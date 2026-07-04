@@ -104,7 +104,7 @@
 
 <img width="1712" height="712" alt="image" src="https://github.com/user-attachments/assets/1009b9ad-5212-4575-b8b9-f99f57c49de1" />
 
-
+https://www.figma.com/design/Vq5QMbXViqNAHOJi2ChqVa/Stockshorts?node-id=0-1&p=f&t=7F5aSTpdKktPQ0Mu-0
 
 ---
 
