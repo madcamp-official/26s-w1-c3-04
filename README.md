@@ -102,6 +102,10 @@
 
 <!-- Figma 링크 또는 이미지 첨부 -->
 
+<img width="1712" height="712" alt="image" src="https://github.com/user-attachments/assets/1009b9ad-5212-4575-b8b9-f99f57c49de1" />
+
+
+
 ---
 
 ## DB 스키마
