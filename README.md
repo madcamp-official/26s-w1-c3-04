@@ -123,7 +123,7 @@ https://www.figma.com/design/Vq5QMbXViqNAHOJi2ChqVa/Stockshorts?node-id=0-1&p=f&
 > 필요한 테이블, 주요 필드, 데이터 타입, 테이블 간 관계를 정리
 
 <!-- ERD 이미지 또는 테이블 정의 -->
-
+![ERD 이미지](./images/stock-shorts-final.png)
 ---
 
 ## API 문서
