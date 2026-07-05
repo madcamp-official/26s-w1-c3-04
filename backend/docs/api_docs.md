@@ -100,7 +100,7 @@
 
 | Method | Endpoint | 설명 | 요청 | 응답 | 에러 |
 |---|---|---|---|---|---|
-| GET | /sectors | 대분류(9개) + 하위 분야 전체 목록, 디바이스별 스위치 on/off 상태 포함 | 없음 | `{ "groups": [{ "group_name": "소비재/문화/트렌드", "sectors": [{ "id":12, "name":"엔터테인먼트", "is_on": true }, { "id":13, "name":"뷰티", "is_on": false }] }] }` | DEVICE_ID_MISSING |
+| GET | /sectors | 대분류(5개) + 하위 분야 전체 목록, 디바이스별 스위치 on/off 상태 포함 | 없음 | `{ "groups": [{ "group_name": "소비재/문화/트렌드", "sectors": [{ "id":12, "name":"엔터테인먼트", "is_on": true }, { "id":13, "name":"뷰티", "is_on": false }] }] }` | DEVICE_ID_MISSING |
 | POST | /sectors/{sector_id}/subscriptions | 하위 분야 스위치 켜기 | path | `{ "sector_id":12, "on": true }` | RESOURCE_NOT_FOUND, DUPLICATE_ACTION |
 | DELETE | /sectors/{sector_id}/subscriptions | 하위 분야 스위치 끄기 | path | `{ "sector_id":12, "on": false }` | RESOURCE_NOT_FOUND |
 | POST | /sectors/groups/{group_name}/subscriptions | 대분류 일괄 켜기 (그룹 내 모든 하위 분야 on — "전체선택" 로직) | path: `group_name` | `{ "group_name":"소비재/문화/트렌드", "sector_ids":[12,13,14] }` | RESOURCE_NOT_FOUND(없는 그룹명) |
