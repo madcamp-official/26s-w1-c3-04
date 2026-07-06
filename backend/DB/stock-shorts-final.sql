@@ -1,6 +1,6 @@
 ﻿-- 분야 테이블
 CREATE TABLE `Sectors` (
-	`id`		BIGINT		NOT NULL,
+	`id`		BIGINT		NOT NULL	AUTO_INCREMENT,
 	`group_name`	VARCHAR(50)	NOT NULL,
 	`group_order`	INT		NOT NULL,
 	`display_order`	INT		NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE `Sectors` (
  
 -- 디바이스(사용자 단말) 테이블
 CREATE TABLE `Device` (
-	`id`		BIGINT		NOT NULL,
+	`id`		BIGINT		NOT NULL	AUTO_INCREMENT,
 	`device_uuid`	VARCHAR(36)	NOT NULL,
 	`created_at`	TIMESTAMP	NOT NULL,
 	PRIMARY KEY (`id`),
@@ -19,7 +19,7 @@ CREATE TABLE `Device` (
  
 -- 회사(종목) 테이블
 CREATE TABLE `Companies` (
-	`id`		BIGINT		NOT NULL,
+	`id`		BIGINT		NOT NULL	AUTO_INCREMENT,
 	`name`		VARCHAR(100)	NOT NULL,
 	`ticker`	VARCHAR(20)	NOT NULL,
 	`logo_url`	VARCHAR(500)	NULL,
@@ -29,7 +29,7 @@ CREATE TABLE `Companies` (
  
 -- 디바이스별 분야 구독 테이블
 CREATE TABLE `Device_Sector_Subscription` (
-	`id`		BIGINT	NOT NULL,
+	`id`		BIGINT	NOT NULL	AUTO_INCREMENT,
 	`device_id`	BIGINT	NOT NULL,	-- Device.id 참조
 	`sector_id`	BIGINT	NOT NULL,	-- Sectors.id 참조
 	PRIMARY KEY (`id`),
@@ -42,7 +42,7 @@ CREATE TABLE `Device_Sector_Subscription` (
  
 -- 기사(뉴스) 테이블
 CREATE TABLE `Articles` (
-	`id`			BIGINT		NOT NULL,
+	`id`			BIGINT		NOT NULL	AUTO_INCREMENT,
 	`source_name`		VARCHAR(100)	NOT NULL,
 	`title`			VARCHAR(300)	NOT NULL,
 	`source_url`		VARCHAR(1000)	NOT NULL,
@@ -73,7 +73,7 @@ CREATE TABLE `Articles` (
  
 -- 디바이스별 기사 인터랙션(좋아요/스크랩 등) 테이블
 CREATE TABLE `Device_Article_Interaction` (
-	`id`			BIGINT		NOT NULL,
+	`id`			BIGINT		NOT NULL	AUTO_INCREMENT,
 	`device_id`		BIGINT		NOT NULL,	-- Device.id 참조
 	`article_id`		BIGINT		NOT NULL,	-- Articles.id 참조
 	`interaction_type`	VARCHAR(20)	NOT NULL,	-- 좋아요, 스크랩, 열람
@@ -88,7 +88,7 @@ CREATE TABLE `Device_Article_Interaction` (
  
 -- 디바이스별 기업 구독 테이블
 CREATE TABLE `User_Company_Subscription` (
-	`id`		BIGINT		NOT NULL,
+	`id`		BIGINT		NOT NULL	AUTO_INCREMENT,
 	`device_id`	BIGINT		NOT NULL,	-- Device.id 참조
 	`company_id`	BIGINT		NOT NULL,	-- Companies.id 참조
 	`subscribed_at`	TIMESTAMP	NULL,
@@ -102,7 +102,7 @@ CREATE TABLE `User_Company_Subscription` (
  
 -- 스토리(기업 상세) 열람 기록 테이블
 CREATE TABLE `Story_view_logs` (
-	`id`			BIGINT		NOT NULL,
+	`id`			BIGINT		NOT NULL	AUTO_INCREMENT,
 	`device_id`		BIGINT		NOT NULL,	-- Device.id 참조
 	`company_id`		BIGINT		NOT NULL,	-- Companies.id 참조
 	`last_viewed_at`	TIMESTAMP	NOT NULL,
@@ -116,7 +116,7 @@ CREATE TABLE `Story_view_logs` (
  
 -- 디바이스별 차트 열람 기록 테이블
 CREATE TABLE `Device_Company_View_Logs` (
-	`id`			BIGINT		NOT NULL,
+	`id`			BIGINT		NOT NULL	AUTO_INCREMENT,
 	`device_id`		BIGINT		NOT NULL,	-- Device.id 참조
 	`company_id`		BIGINT		NOT NULL,	-- Companies.id 참조
 	`last_viewed_at`	TIMESTAMP	NOT NULL,
