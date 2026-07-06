@@ -51,8 +51,6 @@ CREATE TABLE `Articles` (
 	`summary_headline`	VARCHAR(150)	NULL,
 	`summary_body`		TEXT		NULL,
 	`importance_reason`	VARCHAR(300)	NULL,
-	`final_influence_score`	INT		NULL,
-	`is_marketing_pr`	BOOLEAN		NOT NULL	DEFAULT false,
 	`like_count`		INT		NOT NULL	DEFAULT 0,
 	`published_at`		TIMESTAMP	NOT NULL,
 	`company_id_1`		BIGINT		NULL,		-- Companies.id 참조 (관련 기업 1)
@@ -61,6 +59,8 @@ CREATE TABLE `Articles` (
 	`sector_id_2`		BIGINT		NULL,		-- Sectors.id 참조 (관련 섹터 2)
 	PRIMARY KEY (`id`),
 	UNIQUE KEY `UQ_ARTICLES_URL_HASH` (`url_hash`),
+	INDEX `IX_ARTICLES_COMPANY_ID` (`company_id_1`, `company_id_2`), -- 기업별 기사 조회용
+	INDEX `IX_ARTICLES_SECTOR_ID` (`sector_id_1`, `sector_id_2`), -- 분야별 기사 조회용
 	CONSTRAINT `FK_Companies_TO_Articles_1`
 		FOREIGN KEY (`company_id_1`) REFERENCES `Companies` (`id`),
 	CONSTRAINT `FK_Companies_TO_Articles_2`
@@ -105,16 +105,18 @@ CREATE TABLE `Story_view_logs` (
 	`id`			BIGINT		NOT NULL	AUTO_INCREMENT,
 	`device_id`		BIGINT		NOT NULL,	-- Device.id 참조
 	`company_id`		BIGINT		NOT NULL,	-- Companies.id 참조
-	`last_viewed_at`	TIMESTAMP	NOT NULL,
+	`last_viewed_article_id`	BIGINT		NULL,	-- Articles.id 참조
 	PRIMARY KEY (`id`),
 	UNIQUE KEY `UQ_STORY_VIEW_LOGS` (`device_id`, `company_id`),
 	CONSTRAINT `FK_Device_TO_Story_view_logs_1`
 		FOREIGN KEY (`device_id`) REFERENCES `Device` (`id`),
 	CONSTRAINT `FK_Companies_TO_Story_view_logs_1`
-		FOREIGN KEY (`company_id`) REFERENCES `Companies` (`id`)
+		FOREIGN KEY (`company_id`) REFERENCES `Companies` (`id`),
+	CONSTRAINT `FK_Articles_TO_Story_view_logs_1`
+    	FOREIGN KEY (`last_viewed_article_id`) REFERENCES `Articles` (`id`)
 );
  
--- 디바이스별 차트 열람 기록 테이블
+-- 차트 열람 기록 테이블
 CREATE TABLE `Device_Company_View_Logs` (
 	`id`			BIGINT		NOT NULL	AUTO_INCREMENT,
 	`device_id`		BIGINT		NOT NULL,	-- Device.id 참조
