@@ -9,6 +9,7 @@ const sectorsRouter = require('./routes/sectors');
 const articlesRouter = require('./routes/articles');
 const scrapsRouter = require('./routes/scraps');
 const { startRssCron, collectAll } = require('./jobs/rssCollector');
+const { startTaggingCron, tagPendingArticles } = require('./jobs/articleTagger');
 
 const app = express();
 app.use(cors());
@@ -38,4 +39,7 @@ app.listen(PORT, () => {
   startRssCron();
   // (개발 편의를 위해) 서버 시작 시 1회 즉시 실행
   collectAll().catch((err) => console.error('[RSS] 초기 수집 오류:', err));
+
+  startTaggingCron();
+  tagPendingArticles().catch((err) => console.error('[태깅] 초기 실행 오류:', err));
 });

@@ -11,9 +11,10 @@ import {
   MOCK_ARTICLES, MOCK_COMPANIES, MOCK_SECTOR_GROUPS,
   INIT_RECENT_COMPANY_IDS,
   getCompanyColor, getCompanyInitials, getSectorColor, timeAgo,
-  formatChangeRate, formatPrice, generateMockPriceSeries,
-  type ApiArticle, type ApiCompany, type ApiSectorGroup, type ApiPricePoint,
+  formatChangeRate, formatPrice,
+  type ApiArticle, type ApiCompany, type ApiSectorGroup,
 } from "./mockData";
+import { registerDevice, fetchCompanyChart, type ServerPricePoint } from "./apiClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 // NewsItem/Company는 이제 API 응답 타입을 그대로 사용합니다.
@@ -369,25 +370,98 @@ function ShortsTab({ news, currentIndex, fromCompany, storyViewedIndex, visualOf
   );
 }
 
-// ─── Single Chart View (price + volume) ──────────────────────────────────────
-function SingleChartView({ company: c, timeframe, onTimeframeChange }: {
-  company: Company; timeframe: Timeframe; onTimeframeChange: (t: Timeframe) => void;
-}) {
-  const seed   = useMemo(() => c.id.charCodeAt(0) * 7 + c.id.charCodeAt(1) * 3, [c.id]);
-  const tSeed  = timeframe === "day" ? 1 : timeframe === "week" ? 2 : 3;
-  const points = timeframe === "day" ? 24 : timeframe === "week" ? 7 : 30;
+// ─── Candlestick shape (양봉/음봉 몸통+꼬리) ─────────────────────────────────
+// Recharts엔 봉차트 컴포넌트가 따로 없어서, Bar의 커스텀 shape으로 직접 그림.
+// dataKey="range"(=[저가,고가])를 Bar에 주면, Recharts가 y/height를 그 값
+// 범위에 맞게 이미 픽셀로 계산해서 넘겨주므로, 그 안에서 시가/종가 위치만
+// 비례식으로 다시 계산해서 몸통 사각형을 그리면 됨.
+function Candle(props: any) {
+  const { x, width, y, height, payload } = props;
+  const { open, close, high, low } = payload;
+  const isUp = close >= open;
+  const color = isUp ? "#f43f5e" : "#3b82f6";
 
-  // API의 price_series(OHLCV) 구조 그대로 생성. 실제 연동 시 이 useMemo를
-  // fetch(`/companies/${c.id}/chart?period=...`) 결과로 교체하면 됩니다.
-  const series: ApiPricePoint[] = useMemo(
-    () => generateMockPriceSeries(c.current_price, points, seed + tSeed),
-    [c.current_price, points, seed, tSeed]
+  const range = high - low || 1;
+  const pxPerUnit = height / range;
+  const openY = y + (high - open) * pxPerUnit;
+  const closeY = y + (high - close) * pxPerUnit;
+  const bodyY = Math.min(openY, closeY);
+  const bodyHeight = Math.max(Math.abs(closeY - openY), 1.5); // 시가=종가(도지)여도 최소 두께 보장
+  const bodyWidth = Math.max(width * 0.62, 2);
+  const bodyX = x + (width - bodyWidth) / 2;
+  const wickX = x + width / 2;
+
+  return (
+    <g>
+      {/* 꼬리 — 고가~저가 전체 */}
+      <line x1={wickX} x2={wickX} y1={y} y2={y + height} stroke={color} strokeWidth={1.4} />
+      {/* 몸통 — 시가~종가 */}
+      <rect x={bodyX} y={bodyY} width={bodyWidth} height={bodyHeight} fill={color} rx={1} />
+    </g>
   );
+}
 
-  const { data, volData, hi, lo, first, last } = useMemo(() => {
-    const d = series.map((p, i) => ({ i, price: p.close }));
+// 캔들 전용 툴팁 — OHLC 네 값을 한 번에 보여줌
+function CandleTooltip({ active, payload }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const d = payload[0].payload;
+  const isUp = d.close >= d.open;
+  const color = isUp ? "#f43f5e" : "#3b82f6";
+  return (
+    <div style={{ background: "#1a2240", border: "1px solid #2a3460", borderRadius: 10, fontSize: 11, color: "#e2e8f8", padding: "7px 11px", lineHeight: 1.7 }}>
+      <div style={{ color: "#7488b8", fontWeight: 700, marginBottom: 2 }}>{d.time}</div>
+      <div>시가 {d.open.toLocaleString()}</div>
+      <div>고가 {d.high.toLocaleString()}</div>
+      <div>저가 {d.low.toLocaleString()}</div>
+      <div style={{ color, fontWeight: 700 }}>종가 {d.close.toLocaleString()}</div>
+    </div>
+  );
+}
+
+// ─── Single Chart View (price + volume) ──────────────────────────────────────
+function SingleChartView({ company: c }: { company: Company }) {
+  const [series, setSeries] = useState<ServerPricePoint[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // 종목 바뀔 때마다 실제 KIS 연동 API 호출 (일별 고정)
+  useEffect(() => {
+    let cancelled = false;
+    setSeries(null);
+    setError(null);
+    fetchCompanyChart(c.id, "day")
+      .then(res => { if (!cancelled) setSeries(res.price_series); })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "차트를 불러오지 못했어요."); });
+    return () => { cancelled = true; };
+  }, [c.id]);
+
+  const color = getCompanyColor(c.id);
+  const initials = getCompanyInitials(c.name);
+
+  // 로딩/에러 상태 — 아래 실제 차트 렌더링보다 먼저 처리
+  if (error) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: "0 32px" }}>
+        <span style={{ fontSize: 28 }}>⚠️</span>
+        <div style={{ color: "#c8d4f0", fontSize: 13, fontWeight: 600, textAlign: "center" }}>차트를 불러오지 못했어요</div>
+        <div style={{ color: "#404870", fontSize: 11, textAlign: "center" }}>{error}</div>
+      </div>
+    );
+  }
+  if (!series || series.length === 0) {
+    return (
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ color: "#404870", fontSize: 13 }}>차트 불러오는 중...</span>
+      </div>
+    );
+  }
+
+  const { data, volData, hi, lo, first, last } = (() => {
+    const d = series.map((p, i) => ({
+      i, time: p.time, open: p.open, high: p.high, low: p.low, close: p.close, range: [p.low, p.high],
+    }));
     const vd = series.map((p, i) => ({
       i,
+      time: p.time,
       vol: Math.round(p.volume / 10000), // 만주 단위로 환산
       up: i === 0 ? true : p.close >= series[i - 1].close,
     }));
@@ -399,13 +473,18 @@ function SingleChartView({ company: c, timeframe, onTimeframeChange }: {
       hi: Math.max(...series.map(p => p.high)),
       lo: Math.min(...series.map(p => p.low)),
     };
-  }, [series]);
+  })();
+
+  // 날짜 라벨이 너무 빽빽하지 않도록 몇 개 건너뛰며 표시 (대략 6개 안팎만 노출)
+  const dateTickInterval = Math.max(Math.floor(data.length / 6), 0);
+  const formatDateTick = (iso: string) => {
+    const [, m, dd] = iso.split("-");
+    return `${m}/${dd}`;
+  };
 
   const up  = last >= first;
   const pct = ((last - first) / first * 100).toFixed(2);
   const lc  = up ? "#f43f5e" : "#3b82f6";
-  const color = getCompanyColor(c.id);
-  const initials = getCompanyInitials(c.name);
 
   const ttStyle = {
     background: "#1a2240", border: "1px solid #2a3460",
@@ -430,24 +509,15 @@ function SingleChartView({ company: c, timeframe, onTimeframeChange }: {
         </div>
       </div>
 
-      {/* Timeframe toggle */}
-      <div style={{ display: "flex", gap: 4, margin: "12px 0 10px", padding: 4, background: "#0d1220", borderRadius: 12, flexShrink: 0, border: "1px solid #1a2240" }}>
-        {(["day", "week", "month"] as Timeframe[]).map(t => (
-          <button key={t}
-            onClick={e => { e.stopPropagation(); onTimeframeChange(t); }}
-            style={{ flex: 1, padding: "8px 0", borderRadius: 9, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, transition: "all 0.15s", background: timeframe === t ? "#1a2240" : "transparent", color: timeframe === t ? "#e2e8f8" : "#304060" }}>
-            {t === "day" ? "일" : t === "week" ? "주" : "월"}
-          </button>
-        ))}
-      </div>
+      {/* Timeframe toggle 제거 — 일별 차트만 사용 */}
 
       {/* Charts: 70% price + 30% volume, syncId keeps cursor aligned */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
 
-        {/* ── Price line chart (70%) */}
-        <div style={{ flex: 7, minHeight: 0 }}>
+        {/* ── Price candlestick chart (70%) */}
+        <div style={{ flex: 6, minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart
+            <BarChart
               syncId={`stock-${c.id}`}
               data={data}
               margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
@@ -455,18 +525,12 @@ function SingleChartView({ company: c, timeframe, onTimeframeChange }: {
               <XAxis dataKey="i" hide />
               <YAxis hide domain={["auto", "auto"]} />
               <Tooltip
-                contentStyle={ttStyle}
-                formatter={(v: number) => [`${v.toLocaleString()}원`, "주가"]}
-                labelFormatter={() => ""}
+                content={<CandleTooltip />}
                 cursor={cursorStyle}
               />
               <ReferenceLine y={first} stroke="rgba(255,255,255,0.06)" strokeDasharray="4 4" />
-              <Line
-                type="monotone" dataKey="price" stroke={lc} strokeWidth={2.5}
-                dot={false} activeDot={{ r: 4, fill: lc, stroke: "#07090f", strokeWidth: 2 }}
-                isAnimationActive={false}
-              />
-            </LineChart>
+              <Bar dataKey="range" shape={<Candle />} isAnimationActive={false} />
+            </BarChart>
           </ResponsiveContainer>
         </div>
 
@@ -474,15 +538,22 @@ function SingleChartView({ company: c, timeframe, onTimeframeChange }: {
         <div style={{ height: 1, background: "#111828", flexShrink: 0, margin: "0 0 0 0" }} />
 
         {/* ── Volume bar chart (30%) */}
-        <div style={{ flex: 3, minHeight: 0 }}>
+        <div style={{ flex: 4, minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               syncId={`stock-${c.id}`}
               data={volData}
-              margin={{ top: 4, right: 8, left: 0, bottom: 2 }}
+              margin={{ top: 4, right: 8, left: 0, bottom: 14 }}
               barCategoryGap="20%"
             >
-              <XAxis dataKey="i" hide />
+              <XAxis
+                dataKey="time"
+                tickFormatter={formatDateTick}
+                interval={dateTickInterval}
+                tick={{ fill: "#5a6890", fontSize: 9 }}
+                axisLine={{ stroke: "#1a2240" }}
+                tickLine={false}
+              />
               <YAxis hide domain={[0, "auto"]} />
               <Tooltip
                 contentStyle={ttStyle}
@@ -494,7 +565,8 @@ function SingleChartView({ company: c, timeframe, onTimeframeChange }: {
                 {volData.map((d, i) => (
                   <Cell
                     key={`vol-${c.id}-${i}`}
-                    fill={d.up ? "rgba(244,63,94,0.65)" : "rgba(59,130,246,0.65)"}
+                    fill={d.up ? "#f43f5e" : "#3b82f6"}
+                    fillOpacity={0.9}
                   />
                 ))}
               </Bar>
@@ -523,13 +595,33 @@ function SingleChartView({ company: c, timeframe, onTimeframeChange }: {
 
 // ─── Mini Chart Card (for Dual View) ─────────────────────────────────────────
 function MiniChartCard({ company: c, onPress }: { company: Company; onPress: () => void }) {
-  const seed = useMemo(() => c.id.charCodeAt(0) * 7 + c.id.charCodeAt(1) * 3, [c.id]);
-  const series = useMemo(() => generateMockPriceSeries(c.current_price, 24, seed + 1), [c.current_price, seed]);
-  const data = useMemo(() => series.map((p, i) => ({ i, price: p.close })), [series]);
-  const first = series[0].open, last = series[series.length - 1].close;
-  const up = last >= first, pct = ((last - first) / first * 100).toFixed(2), lc = up ? "#f43f5e" : "#3b82f6";
+  const [series, setSeries] = useState<ServerPricePoint[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSeries(null);
+    setError(null);
+    fetchCompanyChart(c.id, "day")
+      .then(res => { if (!cancelled) setSeries(res.price_series); })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "불러오기 실패"); });
+    return () => { cancelled = true; };
+  }, [c.id]);
+
   const color = getCompanyColor(c.id);
   const initials = getCompanyInitials(c.name);
+
+  if (error || !series || series.length === 0) {
+    return (
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#0d1220", borderRadius: 20, border: "1px solid #1a2240", minHeight: 0 }}>
+        <span style={{ color: "#404870", fontSize: 12 }}>{error ?? "차트 불러오는 중..."}</span>
+      </div>
+    );
+  }
+
+  const data = series.map((p, i) => ({ i, price: p.close }));
+  const first = series[0].open, last = series[series.length - 1].close;
+  const up = last >= first, pct = ((last - first) / first * 100).toFixed(2), lc = up ? "#f43f5e" : "#3b82f6";
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#0d1220", borderRadius: 20, border: "1px solid #1a2240", overflow: "hidden", minHeight: 0 }}>
@@ -575,9 +667,8 @@ function DualChartView({ companies, onSelectSingle }: { companies: Company[]; on
 }
 
 // ─── Chart Tab ────────────────────────────────────────────────────────────────
-function ChartTab({ chartMode, allCompanies, cardTimeframes, onTimeframeChange, onMenuPress, onSelectSingle }: {
+function ChartTab({ chartMode, allCompanies, onMenuPress, onSelectSingle }: {
   chartMode: ChartMode | null; allCompanies: Company[];
-  cardTimeframes: Record<string, Timeframe>; onTimeframeChange: (id: string, t: Timeframe) => void;
   onMenuPress: () => void; onSelectSingle: (id: string) => void;
 }) {
   const getC = (id: string) => allCompanies.find(c => c.id === id);
@@ -624,13 +715,7 @@ function ChartTab({ chartMode, allCompanies, cardTimeframes, onTimeframeChange, 
         ) : chartMode.type === "single" ? (
           (() => {
             const c = getC(chartMode.companyId);
-            return c ? (
-              <SingleChartView
-                company={c}
-                timeframe={cardTimeframes[c.id] ?? "day"}
-                onTimeframeChange={t => onTimeframeChange(c.id, t)}
-              />
-            ) : null;
+            return c ? <SingleChartView company={c} /> : null;
           })()
         ) : (
           <DualChartView
@@ -859,6 +944,11 @@ export default function App() {
   const [tab, setTab]       = useState<Tab>("home");
   const [overlay, setOverlay] = useState<Overlay>(null);
 
+  // 앱 최초 실행 시 디바이스 등록 (X-Device-Id 헤더로 쓸 UUID를 백엔드에 upsert)
+  useEffect(() => {
+    registerDevice().catch(err => console.error("디바이스 등록 실패:", err));
+  }, []);
+
   // Shorts
   const [shortsIdx, setShortsIdx]       = useState(0);
   const [shortsFrom, setShortsFrom]     = useState<string | null>(null);
@@ -873,7 +963,6 @@ export default function App() {
   // Chart: mode-based (single or dual), no more card stack
   const [chartMode, setChartMode]           = useState<ChartMode | null>({ type: "single", companyId: "005930" });
   const [recentIds, setRecentIds]           = useState<string[]>(INIT_RECENT);
-  const [cardTimeframes, setCardTimeframes] = useState<Record<string, Timeframe>>({});
 
   // Data — mockData.ts에서 API 응답 구조 그대로 초기화
   const [news, setNews]             = useState<NewsItem[]>(MOCK_ARTICLES);
@@ -986,7 +1075,6 @@ export default function App() {
   const toggleStockSub  = (code: string) => setStockSubs(p => { const n = new Set(p); n.has(code) ? n.delete(code) : n.add(code); return n; });
   const toggleSectorSub = (id: string)   => setSectorSubs(p => ({ ...p, [id]: !p[id] }));
   const setSectorSubVal = (id: string, val: boolean) => setSectorSubs(p => ({ ...p, [id]: val }));
-  const setCardTimeframe = (id: string, t: Timeframe) => setCardTimeframes(p => ({ ...p, [id]: t }));
 
   // Panel → single chart (always single mode)
   const handleSelectChartCompany = (id: string) => {
@@ -1117,7 +1205,6 @@ export default function App() {
           })()}
           {tab === "chart" && (
             <ChartTab chartMode={chartMode} allCompanies={MOCK_COMPANIES}
-              cardTimeframes={cardTimeframes} onTimeframeChange={setCardTimeframe}
               onMenuPress={() => setOverlay("companySelect")}
               onSelectSingle={handleChartSelectSingle} />
           )}

@@ -1,7 +1,7 @@
 // Google Gemini API 호출 헬퍼. JSON만 반환하도록 강제하는 용도.
 require('dotenv').config();
 
-const MODEL = 'gemini-2.5-flash'; // 무료 티어 대상 모델
+const MODEL = 'gemini-3.1-flash-lite'; // 무료 티어 대상 모델
 
 async function callGemini(systemPrompt, userPrompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;

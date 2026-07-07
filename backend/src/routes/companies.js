@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 
+const { getDailyChart, toPriceSeries } = require('../kis');
+
 // GET /api/companies?q=검색어
 router.get('/', async (req, res, next) => {
   const { q } = req.query;
@@ -126,4 +128,63 @@ router.post('/:id/story-views', async (req, res, next) => {
   }
 });
 
+// GET /api/companies/:id/chart?period=day|week|month
+router.get('/:id/chart', async (req, res, next) => {
+  const companyId = req.params.id;
+  const periodMap = { day: 'D', week: 'W', month: 'M' };
+  const period = req.query.period || 'day';
+  const periodCode = periodMap[period];
+
+  if (!periodCode) {
+    return res.status(400).json({
+      error_code: 'VALIDATION_ERROR',
+      message: 'period는 day, week, month 중 하나여야 합니다.',
+    });
+  }
+
+  try {
+    const [companyRows] = await pool.query(
+      'SELECT id, name, ticker FROM `Companies` WHERE id = ?',
+      [companyId]
+    );
+    if (companyRows.length === 0) {
+      return res.status(404).json({
+        error_code: 'RESOURCE_NOT_FOUND',
+        message: '존재하지 않는 종목입니다.',
+      });
+    }
+    const company = companyRows[0];
+
+    const kisResult = await getDailyChart(company.ticker, periodCode);
+    if (kisResult.rt_cd !== '0') {
+      return res.status(502).json({
+        error_code: 'EXTERNAL_API_ERROR',
+        message: kisResult.msg1 || 'KIS API 호출 실패',
+      });
+    }
+
+    const priceSeries = toPriceSeries(kisResult.output2);
+    const latest = kisResult.output1;
+
+    // 최근 본 항목 기록
+    await pool.query(
+      `INSERT INTO \`Device_Company_View_Logs\` (device_id, company_id, last_viewed_at)
+       VALUES (?, ?, NOW())
+       ON DUPLICATE KEY UPDATE last_viewed_at = NOW()`,
+      [req.deviceId, companyId]
+    );
+
+    res.json({
+      company_id: Number(companyId),
+      ticker: company.ticker,
+      current_price: Number(latest.stck_prpr),
+      change_rate: Number(latest.prdy_ctrt),
+      price_series: priceSeries,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
+
