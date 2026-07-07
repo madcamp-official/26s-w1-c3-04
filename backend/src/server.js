@@ -8,8 +8,8 @@ const companiesRouter = require('./routes/companies');
 const sectorsRouter = require('./routes/sectors');
 const articlesRouter = require('./routes/articles');
 const scrapsRouter = require('./routes/scraps');
-const { startRssCron, collectAll } = require('./jobs/rssCollector');
-const { startTaggingCron, tagPendingArticles } = require('./jobs/articleTagger');
+const { startRssCron, collectAll } = require('./jobs/rssCollector'); // 기사 수집기
+const { startTaggingCron, tagPendingArticles } = require('./jobs/articleTagger'); // 기사 태깅/요약기
 
 const app = express();
 app.use(cors());
@@ -40,6 +40,8 @@ app.listen(PORT, () => {
   // (개발 편의를 위해) 서버 시작 시 1회 즉시 실행
   collectAll().catch((err) => console.error('[RSS] 초기 수집 오류:', err));
 
+  // AI 태깅/요약 스케줄러 시작
   startTaggingCron();
-  tagPendingArticles().catch((err) => console.error('[태깅] 초기 실행 오류:', err));
+  // (개발 편의를 위해) 서버 시작 시 1회 즉시 실행
+  tagPendingArticles().catch((err) => console.error('[태깅] 초기 태깅 오류:', err));
 });

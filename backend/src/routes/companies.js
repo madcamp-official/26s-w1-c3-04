@@ -36,23 +36,10 @@ router.get('/', async (req, res, next) => {
 router.get('/subscriptions', async (req, res, next) => {
   try {
     const [rows] = await pool.query(
-      `SELECT
-         c.id, c.name, c.ticker, c.logo_url,
-         -- 이 회사의 24시간 내 기사 중, 마지막으로 본 기사 ID보다 더 큰 ID(최신)를 가진 기사가 있으면 true
-         EXISTS(
-           SELECT 1 FROM \`Articles\` a
-           WHERE (a.company_id_1 = c.id OR a.company_id_2 = c.id)
-             AND a.published_at >= NOW() - INTERVAL 24 HOUR
-             AND a.id > (
-               SELECT IFNULL(MAX(svl.last_viewed_article_id), 0)
-               FROM \`Story_view_logs\` svl
-               WHERE svl.device_id = s.device_id AND svl.company_id = c.id
-             )
-         ) AS has_unread
-       FROM \`User_Company_Subscription\` s
-       JOIN \`Companies\` c ON c.id = s.company_id
-       WHERE s.device_id = ?
-       ORDER BY s.subscribed_at DESC`,
+      `SELECT company_id AS id, name, ticker, logo_url, has_unread
+       FROM \`CompanySubscriptionWithStatus\`
+       WHERE device_id = ?
+       ORDER BY subscribed_at DESC`,
       [req.deviceId]
     );
     res.json({ companies: rows });
