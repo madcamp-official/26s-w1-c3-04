@@ -592,13 +592,15 @@ function SingleChartView({ company: c }: { company: Company }) {
                 dataKey="time"
                 tickFormatter={formatDateTick}
                 interval={dateTickInterval}
-                tick={{ fill: "#5a6890", fontSize: 9 }}
+                tick={{ fill: "#e2e8f8", fontSize: 9 }}
                 axisLine={{ stroke: "#1a2240" }}
                 tickLine={false}
               />
               <YAxis hide domain={[0, "auto"]} />
               <Tooltip
                 contentStyle={ttStyle}
+                itemStyle={{ color: "#e2e8f8" }}
+                labelStyle={{ color: "#e2e8f8" }}
                 formatter={(v: number) => [`${v.toLocaleString()}만주`, "거래량"]}
                 labelFormatter={() => ""}
                 cursor={{ fill: "rgba(255,255,255,0.04)" }}
