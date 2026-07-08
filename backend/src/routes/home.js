@@ -7,7 +7,7 @@ router.get('/', async (req, res, next) => {
   try {
     // 1) 구독 기업 스토리 레일 (안 읽음 = 빨간 테두리)
     const [stories] = await pool.query(
-      `SELECT company_id, name, logo_url, has_unread
+      `SELECT company_id, name, has_unread
        FROM \`CompanySubscriptionWithStatus\`
        WHERE device_id = ?
        ORDER BY subscribed_at DESC`,
@@ -30,7 +30,6 @@ router.get('/', async (req, res, next) => {
       stories: stories.map((s) => ({
         companyId: s.company_id,
         name: s.name,
-        logoUrl: s.logo_url,
         hasUnread: !!s.has_unread,
       })),
       summaryCards,

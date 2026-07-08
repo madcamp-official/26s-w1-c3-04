@@ -65,9 +65,9 @@ ${taxonomyAsPromptText()}
 async function prepareGroup(articles) {
   return Promise.all(
     articles.map(async (article) => {
-      const body = await fetchArticleBody(article.source_url);
+      const { body, thumbnailUrl } = await fetchArticleBody(article.source_url);
       const candidates = await findCandidateCompanies(`${article.title} ${body}`);
-      return { article, body, candidates };
+      return { article, body, thumbnailUrl, candidates };
     })
   );
 }
@@ -100,7 +100,7 @@ async function tagGroup(articles) {
       console.warn(`[태깅] 응답의 id(${result.id})에 해당하는 기사를 못 찾음, 건너뜀`);
       continue;
     }
-    const { article, candidates } = found;
+    const { article, candidates, thumbnailUrl } = found;
 
     const matched = (result.subject_companies || [])
       .map((name) => candidates.find((c) => c.name === name))
@@ -116,13 +116,14 @@ async function tagGroup(articles) {
 
     await pool.query(
       `UPDATE \`Articles\` SET
-         summary_headline = ?, summary_body = ?, importance_reason = ?,
+         summary_headline = ?, summary_body = ?, importance_reason = ?, thumbnail_url = ?,
          company_id_1 = ?, company_id_2 = ?, sector_id_1 = ?, sector_id_2 = ?
        WHERE id = ?`,
       [
         result.summary_headline,
         result.summary_body,
         result.importance_reason,
+        thumbnailUrl, // 여기에 thumbnailUrl 추가
         companyId1,
         companyId2,
         sectorId1,

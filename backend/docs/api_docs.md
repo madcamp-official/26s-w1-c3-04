@@ -46,7 +46,7 @@
 ```json
 {
   "stories": [
-    { "company_id": 1, "name": "삼성전자", "logo_url": "...", "has_unread": true }
+    { "company_id": 1, "name": "삼성전자", "has_unread": true }
   ],
   "summary_cards": [
     { "type": "index", "name": "KOSPI", "price": 2650.3, "change_rate": 0.8, "sparkline": [2610,2630,2650] }
@@ -141,8 +141,8 @@
 
 | Method | Endpoint | 설명 | 요청 | 응답 | 에러 |
 |---|---|---|---|---|---|
-| GET | /companies | 종목 검색 (구독 추가 화면, 차트 검색 패널 공용) | query: `q`(검색어), `limit?` | `{ "companies": [{ "id":5, "name":"삼성전자", "ticker":"005930", "logo_url":"...", "is_subscribed": true }] }` | VALIDATION_ERROR(q 누락) |
-| GET | /companies/subscriptions | 내가 구독 중인 종목 목록 (스토리 레일 / 워치리스트 / 차트 패널 "구독 중인 기업"에 공용) | 없음 | `{ "companies": [{ "id":5, "name":"삼성전자", "ticker":"005930", "logo_url":"...", "has_unread": true }] }` | DEVICE_ID_MISSING |
+| GET | /companies | 종목 검색 (구독 추가 화면, 차트 검색 패널 공용) | query: `q`(검색어), `limit?` | `{ "companies": [{ "id":5, "name":"삼성전자", "ticker":"005930", "is_subscribed": true }] }` | VALIDATION_ERROR(q 누락) |
+| GET | /companies/subscriptions | 내가 구독 중인 종목 목록 (스토리 레일 / 워치리스트 / 차트 패널 "구독 중인 기업"에 공용) | 없음 | `{ "companies": [{ "id":5, "name":"삼성전자", "ticker":"005930", "has_unread": true }] }` | DEVICE_ID_MISSING |
 | POST | /companies/{company_id}/subscriptions | 종목 구독 추가 | path | `{ "company_id":5, "subscribed_at":"..." }` | RESOURCE_NOT_FOUND, DUPLICATE_ACTION |
 | DELETE | /companies/{company_id}/subscriptions | 종목 구독 해제 | path | `{ "deleted": true }` | RESOURCE_NOT_FOUND |
 | GET | /companies/recent-views | 차트 탭 "최근 본 항목" 목록 (최근 조회순) | query: `limit?` | `{ "companies": [{ "id":5, "name":"삼성전자", "ticker":"005930", "last_viewed_at":"..." }] }` | DEVICE_ID_MISSING |

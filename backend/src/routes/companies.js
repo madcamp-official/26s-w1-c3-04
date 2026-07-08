@@ -16,7 +16,7 @@ router.get('/', async (req, res, next) => {
 
   try {
     const [rows] = await pool.query(
-      `SELECT c.id, c.name, c.ticker, c.logo_url,
+      `SELECT c.id, c.name, c.ticker,
               EXISTS(
                 SELECT 1 FROM \`User_Company_Subscription\` s
                 WHERE s.device_id = ? AND s.company_id = c.id
@@ -36,7 +36,7 @@ router.get('/', async (req, res, next) => {
 router.get('/subscriptions', async (req, res, next) => {
   try {
     const [rows] = await pool.query(
-      `SELECT company_id AS id, name, ticker, logo_url, has_unread
+      `SELECT company_id AS id, name, ticker, has_unread
        FROM \`CompanySubscriptionWithStatus\`
        WHERE device_id = ?
        ORDER BY subscribed_at DESC`,
