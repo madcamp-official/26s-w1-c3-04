@@ -8,6 +8,7 @@ const companiesRouter = require('./routes/companies');
 const sectorsRouter = require('./routes/sectors');
 const articlesRouter = require('./routes/articles');
 const scrapsRouter = require('./routes/scraps');
+const homeRouter = require('./routes/home');
 const { startRssCron, collectAll } = require('./jobs/rssCollector'); // 기사 수집기
 const { startTaggingCron, tagPendingArticles } = require('./jobs/articleTagger'); // 기사 태깅/요약기
 
@@ -21,6 +22,7 @@ app.use('/api/companies', deviceAuth, companiesRouter);
 app.use('/api/sectors', deviceAuth, sectorsRouter);
 app.use('/api/articles', deviceAuth, articlesRouter);
 app.use('/api/scraps', deviceAuth, scrapsRouter);
+app.use('/api/home', deviceAuth, homeRouter);
 
 // 공통 에러 핸들러 (반드시 라우터 등록 이후에 위치)
 app.use((err, req, res, next) => {

@@ -33,13 +33,14 @@ export interface ApiArticle {
   published_at: string; // ISO 8601
 }
 export interface ApiCompany {
-  id: string; // ticker
+  id: string; // ticker (프론트 내부 식별자로 계속 사용)
+  dbId?: number; // 실제 DB의 숫자 id — 구독/스토리 API 호출 시 필요 (KIS 조회는 ticker로 하지만, 구독·좋아요 같은 DB 조작은 이 값으로 함)
   name: string;
   ticker: string;
   logo_url: string | null;
-  is_subscribed: boolean;
-  current_price: number;
-  change_rate: number; // % 단위, 예: 5.8, -1.4
+  is_subscribed?: boolean;
+  current_price: number | null;
+  change_rate: number | null; // % 단위, 예: 5.8, -1.4
 }
 export interface ApiSectorItem {
   id: string;
@@ -60,22 +61,7 @@ export interface ApiPricePoint {
   volume: number;
 }
 
-// ─── 목업: 종목 ──────────────────────────────────────────────────────────────
-export const MOCK_COMPANIES: ApiCompany[] = [
-  { id: "005930", name: "삼성전자", ticker: "005930", logo_url: null, is_subscribed: true, current_price: 77400, change_rate: 5.8 },
-  { id: "000660", name: "SK하이닉스", ticker: "000660", logo_url: null, is_subscribed: true, current_price: 198500, change_rate: 3.2 },
-  { id: "373220", name: "LG에너지솔루션", ticker: "373220", logo_url: null, is_subscribed: true, current_price: 412000, change_rate: -1.4 },
-  { id: "005380", name: "현대차", ticker: "005380", logo_url: null, is_subscribed: true, current_price: 248000, change_rate: 1.1 },
-  { id: "035420", name: "NAVER", ticker: "035420", logo_url: null, is_subscribed: true, current_price: 182300, change_rate: -0.6 },
-  { id: "035720", name: "카카오", ticker: "035720", logo_url: null, is_subscribed: false, current_price: 52800, change_rate: 0.4 },
-  { id: "051910", name: "LG화학", ticker: "051910", logo_url: null, is_subscribed: false, current_price: 392000, change_rate: -2.1 },
-  { id: "006400", name: "삼성SDI", ticker: "006400", logo_url: null, is_subscribed: false, current_price: 328500, change_rate: -1.8 },
-];
-
-export const INIT_RECENT_COMPANY_IDS = ["005930", "000660", "373220"];
-export const INIT_READ_COMPANY_IDS = ["000660", "005380"];
-
-// ─── 목업: 분야 (대분류 5개, backend-seed_sectors.sql 기준) ────────────────
+// ─── 분야 (대분류 5개, backend-seed_sectors.sql 기준) ──────────────────────
 // 세부분야 30개는 그대로, 그룹 배정만 실제 DB 시드 데이터와 일치시킴
 export const MOCK_SECTOR_GROUPS: ApiSectorGroup[] = [
   { group_name: "기술/성장주 섹터", emoji: "💾", sectors: [
@@ -387,13 +373,15 @@ export function timeAgo(isoString: string): string {
   return `${Math.floor(diffHour / 24)}일 전`;
 }
 
-// 숫자 등락률 → "+5.8%" 형태 문자열
-export function formatChangeRate(rate: number): string {
+// 숫자 등락률 → "+5.8%" 형태 문자열 (null이면 "-" 반환 — KIS 조회 실패 시 대비)
+export function formatChangeRate(rate: number | null): string {
+  if (rate == null) return "-";
   return `${rate >= 0 ? "+" : ""}${rate.toFixed(1)}%`;
 }
 
-// 숫자 가격 → "77,400" 형태 문자열
-export function formatPrice(price: number): string {
+// 숫자 가격 → "77,400" 형태 문자열 (null이면 "-" 반환)
+export function formatPrice(price: number | null): string {
+  if (price == null) return "-";
   return price.toLocaleString("ko-KR");
 }
 
