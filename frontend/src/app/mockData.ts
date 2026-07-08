@@ -37,7 +37,6 @@ export interface ApiCompany {
   dbId?: number; // 실제 DB의 숫자 id — 구독/스토리 API 호출 시 필요 (KIS 조회는 ticker로 하지만, 구독·좋아요 같은 DB 조작은 이 값으로 함)
   name: string;
   ticker: string;
-  logo_url: string | null;
   is_subscribed?: boolean;
   current_price: number | null;
   change_rate: number | null; // % 단위, 예: 5.8, -1.4

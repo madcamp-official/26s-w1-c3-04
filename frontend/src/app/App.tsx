@@ -1079,7 +1079,7 @@ export default function App() {
         if (!next[ref.id]) {
           next[ref.id] = {
             id: ref.id, name: ref.name, ticker: ref.id,
-            logo_url: null, current_price: null, change_rate: null,
+            current_price: null, change_rate: null,
           };
           changed = true;
         }

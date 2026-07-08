@@ -77,7 +77,7 @@ router.get('/', async (req, res, next) => {
 router.get('/subscriptions', async (req, res, next) => {
   try {
     const [rows] = await pool.query(
-      `SELECT c.id, c.name, c.ticker, c.logo_url, s.subscribed_at,
+      `SELECT c.id, c.name, c.ticker, s.subscribed_at,
               EXISTS(
                 SELECT 1
                 FROM \`Articles\` a
@@ -124,7 +124,7 @@ router.get('/prices', async (req, res, next) => {
   try {
     const placeholders = tickerList.map(() => '?').join(',');
     const [rows] = await pool.query(
-      `SELECT id, name, ticker, logo_url FROM \`Companies\` WHERE ticker IN (${placeholders})`,
+      `SELECT id, name, ticker FROM \`Companies\` WHERE ticker IN (${placeholders})`,
       tickerList
     );
     const companies = await attachPrices(rows);
@@ -238,7 +238,6 @@ router.get('/:id/chart', async (req, res, next) => {
     );
 
     res.json({
-      company_id: Number(companyId),
       ticker: company.ticker,
       current_price: Number(latest.stck_prpr),
       change_rate: Number(latest.prdy_ctrt),

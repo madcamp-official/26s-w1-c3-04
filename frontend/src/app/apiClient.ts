@@ -57,7 +57,6 @@ interface ServerCompany {
   id: number;
   name: string;
   ticker: string;
-  logo_url: string | null;
   is_subscribed?: boolean;
   current_price?: number | null;
   change_rate?: number | null;
@@ -72,7 +71,6 @@ function toApiCompany(c: ServerCompany): ApiCompany {
     dbId: c.id,
     name: c.name,
     ticker: c.ticker,
-    logo_url: c.logo_url,
     is_subscribed: c.is_subscribed,
     current_price: c.current_price ?? null,
     change_rate: c.change_rate ?? null,

@@ -7,7 +7,7 @@ router.get('/', async (req, res, next) => {
   try {
     // 1) 구독 기업 스토리 레일 (안 읽음 = 빨간 테두리)
     const [stories] = await pool.query(
-      `SELECT c.id AS company_id, c.name, c.logo_url,
+      `SELECT c.id AS company_id, c.name,
               EXISTS(
                 SELECT 1
                 FROM \`Articles\` a
