@@ -1032,7 +1032,8 @@ function CompanySelectPanel({ query, onQueryChange, allCompanies, subCompanies, 
 }) {
   const recentCompanies = recentIds.map(id => allCompanies.find(c => c.id === id)).filter((c): c is Company => !!c);
   const notInRecent     = subCompanies.filter(c => !recentIds.includes(c.id));
-  const filtered        = allCompanies.filter(c => !query || c.name.includes(query) || c.ticker.includes(query));
+  const q = query.toLowerCase();
+  const filtered        = allCompanies.filter(c => !query || c.name.toLowerCase().includes(q) || c.ticker.toLowerCase().includes(q));
   const list            = query ? filtered : notInRecent;
 
   return (
@@ -1653,7 +1654,7 @@ export default function App() {
   // (백엔드 GET /companies는 q 파라미터 없이는 호출 불가능해서, 검색어 입력 전엔
   // 어차피 전체 종목 목록 자체를 알 수 없음 — 대신 구독 목록은 항상 갖고 있으니 그걸 기본값으로 사용)
   const filteredForSearch = companyQ
-    ? Object.values(companiesById).filter(c => c.name.includes(companyQ) || c.ticker.includes(companyQ))
+    ? (() => { const q = companyQ.toLowerCase(); return Object.values(companiesById).filter(c => c.name.toLowerCase().includes(q) || c.ticker.toLowerCase().includes(q)); })()
     : subCompanies;
   // CompanySelectPanel은 내부에서 query 기준으로 다시 필터링하므로, 여기선 지금까지 알고 있는
   // 회사 전체(companiesById)를 그대로 넘기면 됨 — 디바운스 검색 결과가 들어오는 대로 반영됨
