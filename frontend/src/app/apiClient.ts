@@ -141,13 +141,14 @@ export interface ArticlesSectorResponse {
   hasMore: boolean;
 }
 
-// 분야별 숏츠(메인 피드) — sectorId 생략하면 전체, cursor 생략하면 첫 페이지
+// 분야별 숏츠(메인 피드) — sectorIds 생략(또는 빈 배열)하면 전체, cursor 생략하면 첫 페이지.
+// sectorIds는 관심분야 패널에서 토글 on 해놓은 분야들 전체 목록(복수 선택)
 export async function fetchArticles(
-  sectorId?: number,
+  sectorIds?: number[],
   cursor?: number
 ): Promise<ArticlesSectorResponse> {
   const params = new URLSearchParams({ mode: "sector" });
-  if (sectorId != null) params.set("sector_id", String(sectorId));
+  if (sectorIds && sectorIds.length > 0) params.set("sector_id", sectorIds.join(","));
   if (cursor != null) params.set("cursor", String(cursor));
   return apiFetch<ArticlesSectorResponse>(`/articles?${params.toString()}`);
 }
@@ -238,8 +239,6 @@ export async function deleteInteraction(articleId: number, type: "LIKED" | "SCRA
   await apiFetch(`/articles/${articleId}/interactions/${type}`, { method: "DELETE" });
 }
 
-// 스토리 열람 기록 — 홈 화면 안읽음 표시 해제(Story_view_logs)와, 다음 스토리 조회 시
-// is_viewed 계산에 쓰이는 기사 단위 VIEWED 인터랙션을 함께 기록함
 export async function markStoryViewed(companyTicker: string, articleId: number): Promise<void> {
   const dbId = await resolveCompanyDbId(companyTicker);
   await Promise.all([

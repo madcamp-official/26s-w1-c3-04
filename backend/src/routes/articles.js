@@ -110,8 +110,18 @@ router.get('/', async (req, res, next) => {
     params.push(req.deviceId);
 
     if (sector_id) {
-      where += ' AND (a.sector_id_1 = ? OR a.sector_id_2 = ?)';
-      params.push(Number(sector_id), Number(sector_id));
+      // 콤마로 여러 개 넘어올 수 있음 (관심분야 토글 on인 것들 전부) — sector_id=1,3,5
+      // 주/보조 태그 둘 다 확인 — 두 분야에 걸쳐 태깅된 기사도 정상적으로 포함시킴
+      // (프론트에서 sectors[] 전체를 뱃지로 보여줘서, 왜 걸렸는지 알 수 있게 처리함)
+      const sectorIds = String(sector_id)
+        .split(',')
+        .map(Number)
+        .filter((n) => Number.isFinite(n));
+      if (sectorIds.length > 0) {
+        const placeholders = sectorIds.map(() => '?').join(',');
+        where += ` AND (a.sector_id_1 IN (${placeholders}) OR a.sector_id_2 IN (${placeholders}))`;
+        params.push(...sectorIds, ...sectorIds);
+      }
     }
     if (cursor) {
       where += ' AND a.published_at < ?';

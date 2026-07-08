@@ -45,6 +45,9 @@ router.get('/', async (req, res, next) => {
   }
 
   try {
+    // 검색 결과 정렬 기준: 이전엔 ORDER BY가 아예 없어서 순서가 매번 들쭉날쭉했음.
+    // 이제 "얼마나 검색어랑 정확히 맞는지" 기준으로 4단계 우선순위를 두고, 그 안에서는 이름순.
+    // 1) 종목코드 완전 일치 2) 회사명 완전 일치 3) 회사명이 검색어로 시작 4) 그 외(부분 일치)
     const [rows] = await pool.query(
       `SELECT c.id, c.name, c.ticker,
               EXISTS(
@@ -53,8 +56,16 @@ router.get('/', async (req, res, next) => {
               ) AS is_subscribed
        FROM \`Companies\` c
        WHERE c.name LIKE ? OR c.ticker LIKE ?
+       ORDER BY
+         CASE
+           WHEN c.ticker = ? THEN 0
+           WHEN c.name = ? THEN 1
+           WHEN c.name LIKE ? THEN 2
+           ELSE 3
+         END,
+         c.name ASC
        LIMIT 20`,
-      [req.deviceId, `%${q}%`, `%${q}%`]
+      [req.deviceId, `%${q}%`, `%${q}%`, q, q, `${q}%`]
     );
     res.json({ companies: rows });
   } catch (err) {
