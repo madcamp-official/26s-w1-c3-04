@@ -2,7 +2,7 @@ import { DEVICE_ID } from "./deviceId";
 import type { ApiArticle, ApiCompany, ApiSectorGroup } from "./mockData";
 
 // 백엔드 서버 주소. 배포 시 이 값만 실제 서버 주소로 바꾸면 됨.
-const API_BASE_URL = "http://localhost:4000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 // 모든 API 호출에 X-Device-Id 헤더를 자동으로 붙여주는 공통 fetch 래퍼
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
