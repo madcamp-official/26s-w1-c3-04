@@ -22,7 +22,6 @@ CREATE TABLE `Companies` (
 	`id`		BIGINT		NOT NULL	AUTO_INCREMENT,
 	`name`		VARCHAR(100)	NOT NULL,
 	`ticker`	VARCHAR(20)	NOT NULL,
-	`logo_url`	VARCHAR(500)	NULL,
 	PRIMARY KEY (`id`),
 	UNIQUE KEY `UQ_COMPANIES_TICKER` (`ticker`)
 );

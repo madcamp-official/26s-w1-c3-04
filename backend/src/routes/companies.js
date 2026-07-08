@@ -46,7 +46,7 @@ router.get('/', async (req, res, next) => {
 
   try {
     const [rows] = await pool.query(
-      `SELECT c.id, c.name, c.ticker, c.logo_url,
+      `SELECT c.id, c.name, c.ticker,
               EXISTS(
                 SELECT 1 FROM \`User_Company_Subscription\` s
                 WHERE s.device_id = ? AND s.company_id = c.id

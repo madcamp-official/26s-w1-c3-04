@@ -44,7 +44,6 @@ router.get('/', async (req, res, next) => {
       stories: stories.map((s) => ({
         companyId: s.company_id,
         name: s.name,
-        logoUrl: s.logo_url,
         hasUnread: !!s.has_unread,
       })),
       summaryCards,
