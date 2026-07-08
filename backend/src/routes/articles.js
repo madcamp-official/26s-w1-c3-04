@@ -98,6 +98,21 @@ router.get('/', async (req, res, next) => {
       });
     }
 
+    if (mode === 'liked') {
+      // 좋아요 많은 순 Top N — 홈 화면 햄버거 메뉴 "인기 기사" 패널용
+      const limitN = Math.min(Number(limit) || 5, 20);
+      const [rows] = await pool.query(
+        `SELECT ${ARTICLE_FIELDS}
+         FROM \`Articles\` a
+         WHERE a.summary_headline IS NOT NULL AND a.like_count > 0
+         ORDER BY a.like_count DESC, a.published_at DESC
+         LIMIT ?`,
+        [req.deviceId, req.deviceId, limitN]
+      );
+      const articles = await attachCompanySectorRefs(rows);
+      return res.json({ articles });
+    }
+
     // mode === 'sector' (기본값): 최신순, 커서 기반 페이지네이션
     const params = [req.deviceId, req.deviceId]; // is_liked, is_scrapped용 device_id
     let where = `a.summary_headline IS NOT NULL

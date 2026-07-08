@@ -151,6 +151,12 @@ export async function fetchArticles(
   return apiFetch<ArticlesSectorResponse>(`/articles?${params.toString()}`);
 }
 
+// 좋아요 많은 순 Top N — 홈 화면 햄버거 메뉴 "인기 기사" 패널용
+export async function fetchTopLikedArticles(limit = 5): Promise<ApiArticle[]> {
+  const data = await apiFetch<{ articles: ApiArticle[] }>(`/articles?mode=liked&limit=${limit}`);
+  return data.articles;
+}
+
 export interface ScrapsResponse {
   articles: ApiArticle[];
   nextCursor: number | null;

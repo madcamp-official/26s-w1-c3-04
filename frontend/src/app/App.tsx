@@ -2,7 +2,7 @@ const PRICE_REFRESH_INTERVAL_MS = 20000;
 import { useState, useRef, useMemo, useCallback, useEffect, useId } from "react";
 import {
   Home, Play, BarChart2, Bookmark, Menu, Plus, Heart,
-  X, Search, Check, ChevronDown, ChevronRight,
+  X, Search, Check, ChevronDown, ChevronRight, TrendingUp,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, Cell,
@@ -14,7 +14,7 @@ import {
   type ApiArticle, type ApiCompany, type ApiSectorGroup,
 } from "./mockData";
 import {
-  registerDevice, fetchCompanyChart, fetchArticles, fetchStoryArticles,
+  registerDevice, fetchCompanyChart, fetchArticles, fetchStoryArticles, fetchTopLikedArticles,
   fetchSectorGroups, setSectorSubscription, postInteraction, deleteInteraction, markStoryViewed,
   searchCompanies, fetchSubscribedCompanies, fetchCompanyPrices, setCompanySubscription, fetchScrappedArticles,
   type ChartResponse, type ServerPricePoint,
@@ -27,7 +27,7 @@ type NewsItem = ApiArticle;
 type Company  = ApiCompany;
 
 type Tab      = "home" | "shorts" | "chart" | "scrap";
-type Overlay  = null | "interest" | "companySearch" | "companySelect";
+type Overlay  = null | "interest" | "companySearch" | "companySelect" | "highlights";
 type TSt      = "on" | "off" | "partial";
 type ChartMode =
   | { type: "single"; companyId: string }
@@ -117,10 +117,11 @@ function HomeTab({ news, subCompanies, unreadIds, stockSubs, sectorSubs, onMenuP
         <button onClick={onMenuPress} style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10, background: "transparent", border: "none", cursor: "pointer" }}>
           <Menu size={20} color="rgba(255,255,255,0.7)" strokeWidth={1.9} />
         </button>
-        <span style={{ color: "#e2e8f8", fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em" }}>StockShorts</span>
+        <img src="/logo.png" alt="StockShorts" style={{ width: 44, height: 44, borderRadius: 10 }} />
         <div style={{ width: 36, height: 36 }} />
       </div>
-      <div style={{ display: "flex", gap: 14, padding: "8px 20px 12px", overflowX: "auto", scrollbarWidth: "none" }}>
+      {/* data-no-swipe: 가로 스크롤 중에 탭 전환 제스처가 같이 발동하지 않게 함 */}
+      <div data-no-swipe="true" style={{ display: "flex", gap: 14, padding: "8px 20px 12px", overflowX: "auto", scrollbarWidth: "none" }}>
         <button onClick={onAddCompany} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0, background: "transparent", border: "none", cursor: "pointer" }}>
           <div style={{ width: 54, height: 54, borderRadius: "50%", border: "2px dashed #2a3352", background: "#0f1420", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={18} color="#c8d4f0" strokeWidth={2} /></div>
           <span style={{ color: "#c8d4f0", fontSize: 10, width: 54, textAlign: "center" }}>추가</span>
@@ -140,7 +141,7 @@ function HomeTab({ news, subCompanies, unreadIds, stockSubs, sectorSubs, onMenuP
         })}
       </div>
       {/* ── Summary card row: 2 index cards + up-to-5 company cards, horizontal scroll */}
-      <div style={{ overflowX: "auto", scrollbarWidth: "none", marginBottom: 16 }}>
+      <div data-no-swipe="true" style={{ overflowX: "auto", scrollbarWidth: "none", marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 10, padding: "0 20px", width: "max-content" }}>
 
           {/* Index cards — 코스피/코스닥. 실제 연동 시 별도 지수 API 응답으로 교체 */}
@@ -197,7 +198,7 @@ function HomeTab({ news, subCompanies, unreadIds, stockSubs, sectorSubs, onMenuP
         <div style={{ color: "#c8d4f0", fontSize: 13, fontWeight: 700, marginBottom: 12 }}>최근 뉴스</div>
         {recentHeadlines.map((item, idx) => {
           return (
-            <button key={item.id} onClick={() => onNewsPress(item.id, item)} style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer", borderBottom: idx < recentHeadlines.length - 1 ? "1px solid #111828" : "none", padding: "11px 0" }}>
+            <div key={item.id} onClick={() => onNewsPress(item.id, item)} style={{ width: "100%", textAlign: "left", background: "transparent", cursor: "pointer", borderBottom: idx < recentHeadlines.length - 1 ? "1px solid #111828" : "none", padding: "11px 0" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                 <span style={{ color: "#c8d4f0", fontSize: 11, fontWeight: 600, paddingTop: 1, width: 14, flexShrink: 0 }}>{idx + 1}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -223,7 +224,7 @@ function HomeTab({ news, subCompanies, unreadIds, stockSubs, sectorSubs, onMenuP
                   </div>
                 </div>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -233,7 +234,7 @@ function HomeTab({ news, subCompanies, unreadIds, stockSubs, sectorSubs, onMenuP
 
 // ─── Shorts Tab ───────────────────────────────────────────────────────────────
 function ShortsTab({ news, currentIndex, fromCompany, storyViewedIndex, visualOffset, stockSubs, sectorSubs, onLike, onScrap, onMenuPress, onToggleStockSub, onToggleSectorSub }: {
-  news: NewsItem[]; currentIndex: number; fromCompany: string | null;
+  news: NewsItem[]; currentIndex: number; fromCompany: { id: string; name: string } | null;
   storyViewedIndex?: number; // 스토리 모드일 때만 전달 — 여기까지 인덱스는 "이미 봄" 표시
   visualOffset: number;
   stockSubs: Set<string>; sectorSubs: Record<string, boolean>;
@@ -245,9 +246,10 @@ function ShortsTab({ news, currentIndex, fromCompany, storyViewedIndex, visualOf
   // 언론사 이름이 적힌 그라디언트 플레이스홀더를 보여줌 — 기사가 바뀔 때마다 리셋되게 item.id로 키를 둠
   const [imgFailedId, setImgFailedId] = useState<number | null>(null);
   const isDual      = item ? item.companies.length > 1 : false;
-  const firstCompany = item?.companies[0];
-  const fromCompanyInitials = firstCompany ? getCompanyInitials(firstCompany.name) : null;
-  const fromCompanyColor    = firstCompany ? getCompanyColor(firstCompany.id) : null;
+  // 헤더 아바타는 "지금 보고 있는 스토리의 기업"(fromCompany) 기준으로 계산 —
+  // 기사의 companies[0]을 쓰면 2개 기업에 태깅된 기사에서 다른 기업 로고가 뜨는 버그가 있었음
+  const fromCompanyInitials = fromCompany ? getCompanyInitials(fromCompany.name) : null;
+  const fromCompanyColor    = fromCompany ? getCompanyColor(fromCompany.id) : null;
   if (!item) return null; // 방어 코드: 빈 배열/범위 밖 인덱스로 화면이 꺼지는 것 방지 (부모에서 빈 상태 화면을 대신 보여줌)
   const showThumbnail = !!item.thumbnail_url && imgFailedId !== item.id;
 
@@ -264,7 +266,7 @@ function ShortsTab({ news, currentIndex, fromCompany, storyViewedIndex, visualOf
         {fromCompany && fromCompanyInitials && (
           <>
             <div style={{ width: 20, height: 20, borderRadius: "50%", background: fromCompanyColor ?? "#1e2840", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 8, fontWeight: 700 }}>{fromCompanyInitials}</div>
-            <span style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: 600 }}>{fromCompany}</span>
+            <span style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: 600 }}>{fromCompany.name}</span>
           </>
         )}
         {storyViewedIndex !== undefined && (
@@ -855,6 +857,75 @@ function ScrapTab({ news, onPress }: { news: NewsItem[]; onPress: (id: number) =
 }
 
 // ─── Interest Panel ───────────────────────────────────────────────────────────
+// ─── Highlights Panel (홈 화면 햄버거 메뉴) — 좋아요 많은 기사 Top5 + 등락폭 큰 구독종목 Top5 ──
+function HighlightsPanel({ topArticles, loading, topMovers, onArticlePress, onCompanyPress, onClose }: {
+  topArticles: ApiArticle[]; loading: boolean; topMovers: Company[];
+  onArticlePress: (id: number, article: ApiArticle) => void;
+  onCompanyPress: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#0a0e18" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "52px 20px 14px", borderBottom: "1px solid #141c2e", flexShrink: 0 }}>
+        <span style={{ color: "#e2e8f8", fontWeight: 700, fontSize: 15 }}>홈 메뉴</span>
+        <button onClick={onClose} style={{ padding: 6, background: "transparent", border: "none", cursor: "pointer" }}><X size={17} color="rgba(255,255,255,0.4)" /></button>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", scrollbarWidth: "none" }}>
+
+        {/* 좋아요 많은 기사 Top 5 */}
+        <div style={{ padding: "16px 20px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+          <Heart size={13} color="#f43f5e" fill="#f43f5e" />
+          <span style={{ color: "#e2e8f8", fontSize: 13, fontWeight: 700 }}>좋아요 많은 기사</span>
+        </div>
+        {loading ? (
+          <div style={{ padding: "12px 20px", color: "#404870", fontSize: 12 }}>불러오는 중...</div>
+        ) : topArticles.length === 0 ? (
+          <div style={{ padding: "12px 20px", color: "#404870", fontSize: 12 }}>아직 좋아요 받은 기사가 없어요</div>
+        ) : (
+          topArticles.map((item, idx) => (
+            <div key={item.id} onClick={() => onArticlePress(item.id, item)} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 20px", borderBottom: "1px solid #0f1526", cursor: "pointer" }}>
+              <span style={{ color: "#c8d4f0", fontSize: 11, fontWeight: 600, paddingTop: 1, width: 14, flexShrink: 0 }}>{idx + 1}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: "#f0f4ff", fontSize: 12.5, fontWeight: 600, lineHeight: 1.4 }}>{item.summary_headline}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4 }}>
+                  <Heart size={10} color="#f43f5e" fill="#f43f5e" />
+                  <span style={{ color: "#f87096", fontSize: 10, fontWeight: 700 }}>{item.like_count}</span>
+                  <span style={{ color: "#7488b8", fontSize: 10 }}>· {item.source_name}</span>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+
+        {/* 등락폭 큰 구독 종목 Top 5 */}
+        <div style={{ padding: "18px 20px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+          <TrendingUp size={13} color="#4488ff" />
+          <span style={{ color: "#e2e8f8", fontSize: 13, fontWeight: 700 }}>등락폭 큰 구독 종목</span>
+        </div>
+        {topMovers.length === 0 ? (
+          <div style={{ padding: "12px 20px 24px", color: "#404870", fontSize: 12 }}>구독 중인 종목이 없어요</div>
+        ) : (
+          topMovers.map(c => {
+            const up = (c.change_rate ?? 0) >= 0;
+            const color = getCompanyColor(c.id);
+            const initials = getCompanyInitials(c.name);
+            return (
+              <button key={c.id} onClick={() => onCompanyPress(c.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", borderBottom: "1px solid #0f1526", background: "transparent", border: "none", borderBottomWidth: 1, borderBottomStyle: "solid", borderBottomColor: "#0f1526", cursor: "pointer", width: "100%", textAlign: "left" }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", background: color, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: 11 }}>{initials}</div>
+                <span style={{ color: "#c8d4f0", fontSize: 12.5, fontWeight: 600, flex: 1 }}>{c.name}</span>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ color: "#e2e8f8", fontSize: 12, fontWeight: 700 }}>{formatPrice(c.current_price)}원</div>
+                  <div style={{ color: up ? "#f43f5e" : "#3b82f6", fontSize: 11, fontWeight: 700 }}>{formatChangeRate(c.change_rate)}</div>
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function InterestPanel({ groups, subs, onToggleSub, onClose }: {
   groups: ApiSectorGroup[]; subs: Record<string, boolean>; onToggleSub: (id: string, val: boolean) => void;
   onClose: () => void;
@@ -1024,6 +1095,20 @@ export default function App() {
   const [tab, setTab]       = useState<Tab>("home");
   const [overlay, setOverlay] = useState<Overlay>(null);
 
+  // 홈 화면 햄버거 메뉴("highlights") — 열릴 때마다 좋아요 많은 기사 Top5를 새로 조회
+  const [topLikedArticles, setTopLikedArticles] = useState<ApiArticle[]>([]);
+  const [topLikedLoading, setTopLikedLoading] = useState(false);
+  useEffect(() => {
+    if (overlay !== "highlights") return;
+    let cancelled = false;
+    setTopLikedLoading(true);
+    fetchTopLikedArticles(5)
+      .then(articles => { if (!cancelled) setTopLikedArticles(articles); })
+      .catch(err => console.error("인기 기사 조회 실패:", err))
+      .finally(() => { if (!cancelled) setTopLikedLoading(false); });
+    return () => { cancelled = true; };
+  }, [overlay]);
+
   // 앱 최초 실행 시 디바이스 등록 (X-Device-Id 헤더로 쓸 UUID를 백엔드에 upsert)
   useEffect(() => {
     registerDevice().catch(err => console.error("디바이스 등록 실패:", err));
@@ -1031,7 +1116,9 @@ export default function App() {
 
   // Shorts
   const [shortsIdx, setShortsIdx]       = useState(0);
-  const [shortsFrom, setShortsFrom]     = useState<string | null>(null);
+  // 스토리 진입 시의 "그 기업" 정보 — id까지 같이 들고 있어야 아바타 색/이니셜을 정확히 계산할 수 있음
+  // (기사가 회사 2개에 태깅된 경우, 헤더 아바타가 항상 기사의 첫 번째 회사로 고정되던 버그 수정용)
+  const [shortsFrom, setShortsFrom]     = useState<{ id: string; name: string } | null>(null);
   const [shortsOffset, setShortsOffset] = useState(0);
 
   // Story mode — 기업별 스토리(24시간 이내, 고정 시간순, 메인 피드와 동일한 스와이프 방향)
@@ -1354,7 +1441,7 @@ export default function App() {
 
       setStoryMode({ companyId: cId, articles: res.articles });
       setStoryIdx(startIdx);
-      setShortsFrom(company?.name ?? null);
+      setShortsFrom(company ? { id: cId, name: company.name } : null);
       setTab("shorts");
     } catch (err) {
       console.error("스토리 조회 실패:", err);
@@ -1441,11 +1528,52 @@ export default function App() {
     setChartMode({ type: "single", companyId: id });
   };
 
-  // ── Unified gesture handler ────────────────────────────────────────────────
+  // ── 탭/카드 이동 로직 — 드래그(포인터)/트랙패드 휠/방향키 세 가지 입력 방식이
+  // 전부 같은 동작을 하도록 공통 함수로 뽑아둠 ────────────────────────────────
+  const goNextTab = () => {
+    const ci = TAB_ORDER.indexOf(tab);
+    if (tab === "shorts") {
+      const cur = storyMode ? storyMode.articles[storyIdx] : mainFeedDisplay[shortsIdx];
+      if (!cur) return;
+      const codes = cur.companies.map(c => c.id);
+      if (codes.length > 0) {
+        addRecentMultiple(codes);
+        if (codes.length === 1) {
+          setChartMode({ type: "single", companyId: codes[0] });
+        } else {
+          setChartMode({ type: "dual", companyIds: [codes[0], codes[1]] });
+        }
+      }
+      setTab("chart");
+    } else if (ci < TAB_ORDER.length - 1) {
+      setTab(TAB_ORDER[ci + 1]);
+    }
+  };
+  const goPrevTab = () => {
+    const ci = TAB_ORDER.indexOf(tab);
+    if (ci > 0) { setTab(TAB_ORDER[ci - 1]); exitStory(); }
+  };
+  const goNextItem = () => {
+    if (storyMode) {
+      const len = storyMode.articles.length;
+      if (storyIdx < len - 1) setStoryIdx(i => i + 1);
+    } else if (shortsIdx < mainFeedDisplay.length - 1) {
+      setShortsIdx(i => i + 1);
+    }
+  };
+  const goPrevItem = () => {
+    if (storyMode) {
+      if (storyIdx > 0) setStoryIdx(i => i - 1);
+    } else if (shortsIdx > 0) {
+      setShortsIdx(i => i - 1);
+    }
+  };
+
+  // ── Unified gesture handler (드래그/스와이프) ──────────────────────────────
   const ptrRef = useRef<{ sx: number; sy: number; lx: number; ly: number } | null>(null);
 
   const onPtrDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest("button,input,a")) return;
+    if ((e.target as HTMLElement).closest("button,input,a,[data-no-swipe]")) return;
     ptrRef.current = { sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY };
     if (tab === "shorts") {
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
@@ -1468,62 +1596,55 @@ export default function App() {
     const dx = lx - sx, dy = ly - sy;
 
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 48) {
-      const ci = TAB_ORDER.indexOf(tab);
-      if (dx < 0) {
-        if (tab === "shorts") {
-          const cur = storyMode ? storyMode.articles[storyIdx] : mainFeedDisplay[shortsIdx];
-          const codes = cur.companies.map(c => c.id);
-          if (codes.length > 0) {
-            addRecentMultiple(codes);
-            if (codes.length === 1) {
-              setChartMode({ type: "single", companyId: codes[0] });
-            } else {
-              setChartMode({ type: "dual", companyIds: [codes[0], codes[1]] });
-            }
-          }
-          setTab("chart");
-        } else if (ci < TAB_ORDER.length - 1) {
-          setTab(TAB_ORDER[ci + 1]);
-        }
-      } else {
-        if (ci > 0) { setTab(TAB_ORDER[ci - 1]); exitStory(); }
-      }
+      if (dx < 0) goNextTab(); else goPrevTab();
     } else if (tab === "shorts" && Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 48) {
-      if (storyMode) {
-        // 스토리 모드도 메인 피드와 동일한 방향으로 통일: 위로 스와이프(dy<0)=다음, 아래로(dy>0)=이전
-        const len = storyMode.articles.length;
-        if (dy < 0 && storyIdx < len - 1) setStoryIdx(i => i + 1);
-        else if (dy > 0 && storyIdx > 0)  setStoryIdx(i => i - 1);
-      } else {
-        if (dy < 0 && shortsIdx < mainFeedDisplay.length - 1) setShortsIdx(i => i + 1);
-        else if (dy > 0 && shortsIdx > 0)           setShortsIdx(i => i - 1);
-      }
+      // 메인 피드/스토리 모두 동일한 방향: 위로 스와이프(dy<0)=다음, 아래로(dy>0)=이전
+      if (dy < 0) goNextItem(); else goPrevItem();
     }
   };
   const onPtrUp    = () => processGesture();
   const onPtrLeave = () => { if (ptrRef.current) processGesture(); };
 
-  // 마우스 휠 스크롤로도 숏츠를 한 개씩 넘길 수 있게 (웹 배포 시 트랙패드/휠 사용자 대응).
-  // 휠 이벤트는 한 번 스크롤에도 여러 번 연달아 발생하므로, 짧은 잠금 구간을 둬서
-  // "한 번 넘김"이 여러 개로 씹히지 않게 함.
+  // 마우스 휠/트랙패드로도 넘길 수 있게 (웹 배포 시 트랙패드·휠 사용자 대응).
+  // 세로 스크롤(deltaY) = 숏츠/스토리 카드 넘기기, 가로 스크롤(deltaX, 트랙패드
+  // 두 손가락 좌우 스와이프) = 탭 전환. 휠 이벤트는 한 번 스크롤에도 여러 번
+  // 연달아 발생하므로, 짧은 잠금 구간을 둬서 "한 번 넘김"이 여러 개로 씹히지 않게 함.
   const wheelLockRef = useRef(false);
   const onWheel = (e: React.WheelEvent) => {
-    if (tab !== "shorts") return;
-    if ((e.target as HTMLElement).closest("button,input,a")) return;
-    if (Math.abs(e.deltaY) < 16) return; // 아주 작은 휠 흔들림은 무시
+    if ((e.target as HTMLElement).closest("button,input,a,[data-no-swipe]")) return;
+    const adx = Math.abs(e.deltaX), ady = Math.abs(e.deltaY);
+    if (adx < 16 && ady < 16) return; // 아주 작은 휠 흔들림은 무시
     if (wheelLockRef.current) return;
-    wheelLockRef.current = true;
-    setTimeout(() => { wheelLockRef.current = false; }, 450);
 
-    if (storyMode) {
-      const len = storyMode.articles.length;
-      if (e.deltaY > 0 && storyIdx < len - 1) setStoryIdx(i => i + 1);
-      else if (e.deltaY < 0 && storyIdx > 0) setStoryIdx(i => i - 1);
-    } else {
-      if (e.deltaY > 0 && shortsIdx < mainFeedDisplay.length - 1) setShortsIdx(i => i + 1);
-      else if (e.deltaY < 0 && shortsIdx > 0) setShortsIdx(i => i - 1);
+    if (adx > ady) {
+      wheelLockRef.current = true;
+      setTimeout(() => { wheelLockRef.current = false; }, 450);
+      if (e.deltaX > 0) goNextTab(); else goPrevTab();
+    } else if (tab === "shorts") {
+      wheelLockRef.current = true;
+      setTimeout(() => { wheelLockRef.current = false; }, 450);
+      if (e.deltaY > 0) goNextItem(); else goPrevItem();
     }
   };
+
+  // 방향키 네비게이션: 좌우=탭 전환, 상하=숏츠/스토리 카드 넘기기.
+  // ref에 최신 핸들러를 담아두고 리스너 자체는 한 번만 등록(매 렌더 재등록 방지).
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return; // 검색창 입력 중엔 방향키 원래 동작 유지
+    switch (e.key) {
+      case "ArrowRight": e.preventDefault(); goNextTab(); break;
+      case "ArrowLeft":  e.preventDefault(); goPrevTab(); break;
+      case "ArrowDown":  if (tab === "shorts") { e.preventDefault(); goNextItem(); } break;
+      case "ArrowUp":    if (tab === "shorts") { e.preventDefault(); goPrevItem(); } break;
+    }
+  };
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // CompanySearchPanel은 자체 필터링을 안 하므로 여기서 직접 필터링.
   // 검색어가 없을 땐 "전체 목록" 대신 이미 구독 중인 기업들을 기본으로 보여줌
@@ -1551,7 +1672,7 @@ export default function App() {
           {tab === "home" && (
             <HomeTab news={homeRecentNews} subCompanies={storyRowCompanies} unreadIds={unreadCompanyIds}
               stockSubs={stockSubs} sectorSubs={sectorSubs}
-              onMenuPress={() => setOverlay("interest")}
+              onMenuPress={() => setOverlay("highlights")}
               onAddCompany={() => setOverlay("companySearch")}
               onCompanyPress={goFromCompany}
               onNewsPress={goToArticleInFeed} />
@@ -1625,6 +1746,16 @@ export default function App() {
         {overlay && (
           <div style={{ position: "absolute", inset: 0, zIndex: 50, background: "rgba(0,0,0,0.7)" }} onClick={() => setOverlay(null)}>
             <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: 305, background: "#0a0e18", borderRight: "1px solid #141c2e", overflow: "hidden", animation: "slideL 0.28s cubic-bezier(0.22,1,0.36,1)" }} onClick={e => e.stopPropagation()}>
+              {overlay === "highlights" && (
+                <HighlightsPanel
+                  topArticles={topLikedArticles}
+                  loading={topLikedLoading}
+                  topMovers={[...subCompanies].sort((a, b) => Math.abs(b.change_rate ?? 0) - Math.abs(a.change_rate ?? 0)).slice(0, 5)}
+                  onArticlePress={(id, article) => { setOverlay(null); goToArticleInFeed(id, article); }}
+                  onCompanyPress={(id) => { setOverlay(null); goFromCompany(id); }}
+                  onClose={() => setOverlay(null)}
+                />
+              )}
               {overlay === "interest" && (
                 <InterestPanel groups={sectorGroups} subs={sectorSubs} onToggleSub={setSectorSubVal} onClose={() => setOverlay(null)} />
               )}

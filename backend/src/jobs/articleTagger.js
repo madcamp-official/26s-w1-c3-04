@@ -199,4 +199,4 @@ function startTaggingCron() {
   console.log('[태깅] 5분 주기 태깅/요약 스케줄러 등록됨');
 }
 
-module.exports = { tagPendingArticles, startTaggingCron };
+module.exports = { tagPendingArticles, startTaggingCron };

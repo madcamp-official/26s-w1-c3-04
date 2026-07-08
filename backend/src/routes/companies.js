@@ -2,12 +2,13 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 
-const { getDailyChart, toPriceSeries } = require('../kis');
+const { getDailyChart, toPriceSeries, computeChangeRate } = require('../kis');
 
 // 종목 배열에 현재가/등락률을 병렬로 붙여주는 헬퍼.
 // 차트 화면(캔들)과 같은 소스(일자별 시세 API)에서 최신 값을 가져와서,
 // "홈 화면 가격"과 "차트 헤더 가격"이 서로 다르게 보이는 걸 방지함.
-// output2(일자별 배열)는 여기선 필요 없어서 버리고 output1만 사용.
+// 등락률은 output1.prdy_ctrt를 그대로 쓰면 종목과 무관하게 항상 0.0%로 나오는 문제가 있어서,
+// output2(일별 시세)의 최근 두 거래일 종가로 직접 계산함 (안 되면 prdy_ctrt로 폴백).
 // KIS 호출이 실패해도 목록 자체는 보여줄 수 있게, 실패한 종목은 null로 채움.
 async function attachPrices(companies) {
   return Promise.all(
@@ -17,10 +18,12 @@ async function attachPrices(companies) {
         if (result.rt_cd !== '0') {
           throw new Error(result.msg1 || 'KIS API 호출 실패');
         }
+        const priceSeries = toPriceSeries(result.output2);
+        const change_rate = computeChangeRate(priceSeries) ?? Number(result.output1.prdy_ctrt);
         return {
           ...c,
           current_price: Number(result.output1.stck_prpr),
-          change_rate: Number(result.output1.prdy_ctrt),
+          change_rate,
         };
       } catch (err) {
         console.error(`[현재가 조회 실패] ${c.ticker}:`, err.message);
@@ -48,6 +51,9 @@ router.get('/', async (req, res, next) => {
     // 검색 결과 정렬 기준: 이전엔 ORDER BY가 아예 없어서 순서가 매번 들쭉날쭉했음.
     // 이제 "얼마나 검색어랑 정확히 맞는지" 기준으로 4단계 우선순위를 두고, 그 안에서는 이름순.
     // 1) 종목코드 완전 일치 2) 회사명 완전 일치 3) 회사명이 검색어로 시작 4) 그 외(부분 일치)
+    // 대소문자 구분 없이 검색되도록 컬럼/검색어 둘 다 LOWER()로 비교
+    // (DB collation이 대소문자 구분(cs/bin)이어도 항상 동작하게 하기 위함)
+    const qLower = q.toLowerCase();
     const [rows] = await pool.query(
       `SELECT c.id, c.name, c.ticker,
               EXISTS(
@@ -55,17 +61,17 @@ router.get('/', async (req, res, next) => {
                 WHERE s.device_id = ? AND s.company_id = c.id
               ) AS is_subscribed
        FROM \`Companies\` c
-       WHERE c.name LIKE ? OR c.ticker LIKE ?
+       WHERE LOWER(c.name) LIKE ? OR LOWER(c.ticker) LIKE ?
        ORDER BY
          CASE
-           WHEN c.ticker = ? THEN 0
-           WHEN c.name = ? THEN 1
-           WHEN c.name LIKE ? THEN 2
+           WHEN LOWER(c.ticker) = ? THEN 0
+           WHEN LOWER(c.name) = ? THEN 1
+           WHEN LOWER(c.name) LIKE ? THEN 2
            ELSE 3
          END,
          c.name ASC
        LIMIT 20`,
-      [req.deviceId, `%${q}%`, `%${q}%`, q, q, `${q}%`]
+      [req.deviceId, `%${qLower}%`, `%${qLower}%`, qLower, qLower, `${qLower}%`]
     );
     res.json({ companies: rows });
   } catch (err) {
@@ -228,6 +234,7 @@ router.get('/:id/chart', async (req, res, next) => {
 
     const priceSeries = toPriceSeries(kisResult.output2);
     const latest = kisResult.output1;
+    const change_rate = computeChangeRate(priceSeries) ?? Number(latest.prdy_ctrt);
 
     // 최근 본 항목 기록
     await pool.query(
@@ -240,7 +247,7 @@ router.get('/:id/chart', async (req, res, next) => {
     res.json({
       ticker: company.ticker,
       current_price: Number(latest.stck_prpr),
-      change_rate: Number(latest.prdy_ctrt),
+      change_rate,
       price_series: priceSeries,
     });
   } catch (err) {
