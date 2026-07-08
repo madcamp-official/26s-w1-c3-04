@@ -1,20 +1,24 @@
+const PRICE_REFRESH_INTERVAL_MS = 20000;
 import { useState, useRef, useMemo, useCallback, useEffect, useId } from "react";
 import {
   Home, Play, BarChart2, Bookmark, Menu, Plus, Heart,
-  Share2, X, Search, Check, ChevronDown, ChevronRight,
+  X, Search, Check, ChevronDown, ChevronRight,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, Cell,
   ResponsiveContainer, Tooltip, XAxis, YAxis, ReferenceLine,
 } from "recharts";
 import {
-  MOCK_ARTICLES, MOCK_COMPANIES, MOCK_SECTOR_GROUPS,
-  INIT_RECENT_COMPANY_IDS,
   getCompanyColor, getCompanyInitials, getSectorColor, timeAgo,
   formatChangeRate, formatPrice,
   type ApiArticle, type ApiCompany, type ApiSectorGroup,
 } from "./mockData";
-import { registerDevice, fetchCompanyChart, type ServerPricePoint } from "./apiClient";
+import {
+  registerDevice, fetchCompanyChart, fetchArticles, fetchStoryArticles,
+  fetchSectorGroups, setSectorSubscription, postInteraction, deleteInteraction, markStoryViewed,
+  searchCompanies, fetchSubscribedCompanies, fetchCompanyPrices, setCompanySubscription, fetchScrappedArticles,
+  type ChartResponse, type ServerPricePoint,
+} from "./apiClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 // NewsItem/Company는 이제 API 응답 타입을 그대로 사용합니다.
@@ -24,7 +28,6 @@ type Company  = ApiCompany;
 
 type Tab      = "home" | "shorts" | "chart" | "scrap";
 type Overlay  = null | "interest" | "companySearch" | "companySelect";
-type Timeframe = "day" | "week" | "month";
 type TSt      = "on" | "off" | "partial";
 type ChartMode =
   | { type: "single"; companyId: string }
@@ -32,20 +35,16 @@ type ChartMode =
 
 const TAB_ORDER: Tab[] = ["home", "shorts", "chart", "scrap"];
 
-// ─── 초기 상태 계산 (mockData 기준) ────────────────────────────────────────────
-const INIT_STOCK_SUBS = new Set(MOCK_COMPANIES.filter(c => c.is_subscribed).map(c => c.id));
-const INIT_RECENT     = INIT_RECENT_COMPANY_IDS;
-
 // sectors 구조(그룹>세부분야, is_on)에서 "세부분야id → on/off" 플랫 맵 생성
 function buildInitSectorSubs(groups: ApiSectorGroup[]): Record<string, boolean> {
   const map: Record<string, boolean> = {};
   groups.forEach(g => g.sectors.forEach(s => { map[s.id] = s.is_on; }));
   return map;
 }
-const INIT_SUBS = buildInitSectorSubs(MOCK_SECTOR_GROUPS);
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-function isUp(company: Company) { return company.change_rate >= 0; }
+// change_rate는 KIS 조회 실패 시 null일 수 있어서(구조 변경분), null이면 일단 상승(빨강)으로 취급
+function isUp(company: Company) { return (company.change_rate ?? 0) >= 0; }
 
 // ─── Sparkline SVG ────────────────────────────────────────────────────────────
 function Sparkline({ data, up }: { data: number[]; up: boolean }) {
@@ -118,7 +117,7 @@ function HomeTab({ news, subCompanies, unreadIds, onMenuPress, onAddCompany, onC
           <Menu size={20} color="rgba(255,255,255,0.7)" strokeWidth={1.9} />
         </button>
         <span style={{ color: "#e2e8f8", fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em" }}>StockShorts</span>
-        <div style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 12, fontWeight: 700, background: "linear-gradient(135deg,#1a3a9c,#4466cc)" }}>이</div>
+        <div style={{ width: 36, height: 36 }} />
       </div>
       <div style={{ display: "flex", gap: 14, padding: "8px 20px 12px", overflowX: "auto", scrollbarWidth: "none" }}>
         <button onClick={onAddCompany} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0, background: "transparent", border: "none", cursor: "pointer" }}>
@@ -158,20 +157,21 @@ function HomeTab({ news, subCompanies, unreadIds, onMenuPress, onAddCompany, onC
 
           {/* Company cards — sorted by |change_rate| desc, top 5 */}
           {[...subCompanies]
-            .sort((a, b) => Math.abs(b.change_rate) - Math.abs(a.change_rate))
+            .sort((a, b) => Math.abs(b.change_rate ?? 0) - Math.abs(a.change_rate ?? 0))
             .slice(0, 5)
             .map(c => {
               const up = isUp(c);
               const color = getCompanyColor(c.id);
               const initials = getCompanyInitials(c.name);
+              const price = c.current_price ?? 0;
               const seed = c.id.charCodeAt(0) * 7 + c.id.charCodeAt(1) * 3;
               // deterministic sparkline: slight trend matching up/down, ends at current price
               const sparkData = Array.from({ length: 8 }, (_, i) => {
                 const r = Math.sin((seed + 5) * 127.1 + i * 311.7) * 0.5 + 0.5;
                 const trend = up ? (i / 7) * 0.05 : -(i / 7) * 0.05;
-                return Math.round(c.current_price * (0.975 + trend + (r - 0.5) * 0.018));
+                return Math.round(price * (0.975 + trend + (r - 0.5) * 0.018));
               });
-              sparkData[7] = c.current_price; // anchor last point to current price
+              sparkData[7] = price; // anchor last point to current price
               return (
                 <div key={c.id} style={{ width: 124, flexShrink: 0, background: "#0d1220", borderRadius: 16, padding: "11px 12px 8px", border: "1px solid #1a2240" }}>
                   {/* Company avatar + name */}
@@ -206,7 +206,6 @@ function HomeTab({ news, subCompanies, unreadIds, onMenuPress, onAddCompany, onC
                     <span style={{ color: "#2e3d5a", fontSize: 10 }}>{item.source_name}</span>
                     <span style={{ color: "#1e2840", fontSize: 10 }}>·</span>
                     <span style={{ color: "#2e3d5a", fontSize: 10 }}>{timeAgo(item.published_at)}</span>
-                    {item.companies.length > 1 && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 6, background: "rgba(255,170,0,0.12)", color: "#ffaa44" }}>2종목</span>}
                     {firstSector && <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 6, background: item.companies.length > 0 ? "rgba(244,63,94,0.1)" : "rgba(255,255,255,0.04)", color: item.companies.length > 0 ? "#f87096" : "#404870" }}>{firstSector.name}</span>}
                   </div>
                 </div>
@@ -295,7 +294,6 @@ function ShortsTab({ news, currentIndex, fromCompany, storyViewedIndex, visualOf
             {[
               { icon: <Heart size={18} color={item.is_liked ? "#f43f5e" : "rgba(255,255,255,0.4)"} fill={item.is_liked ? "#f43f5e" : "none"} />, bg: item.is_liked ? "rgba(244,63,94,0.13)" : "rgba(255,255,255,0.06)", fn: (e: React.MouseEvent) => { e.stopPropagation(); onLike(item.id); } },
               { icon: <Bookmark size={18} color={item.is_scrapped ? "#3b82f6" : "rgba(255,255,255,0.4)"} fill={item.is_scrapped ? "#3b82f6" : "none"} />, bg: item.is_scrapped ? "rgba(59,130,246,0.13)" : "rgba(255,255,255,0.06)", fn: (e: React.MouseEvent) => { e.stopPropagation(); onScrap(item.id); } },
-              { icon: <Share2 size={18} color="rgba(255,255,255,0.4)" />, bg: "rgba(255,255,255,0.06)", fn: (e: React.MouseEvent) => { e.stopPropagation(); } },
             ].map(({ icon, bg, fn }, i) => (
               <button key={i} onClick={fn} style={{ width: 34, height: 34, borderRadius: "50%", background: bg, display: "flex", alignItems: "center", justifyContent: "center", border: "none", cursor: "pointer", flexShrink: 0, transition: "background 0.15s" }}>
                 {icon}
@@ -420,16 +418,16 @@ function CandleTooltip({ active, payload }: any) {
 
 // ─── Single Chart View (price + volume) ──────────────────────────────────────
 function SingleChartView({ company: c }: { company: Company }) {
-  const [series, setSeries] = useState<ServerPricePoint[] | null>(null);
+  const [chart, setChart] = useState<ChartResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // 종목 바뀔 때마다 실제 KIS 연동 API 호출 (일별 고정)
   useEffect(() => {
     let cancelled = false;
-    setSeries(null);
+    setChart(null);
     setError(null);
-    fetchCompanyChart(c.id, "day")
-      .then(res => { if (!cancelled) setSeries(res.price_series); })
+    fetchCompanyChart(c.id)
+      .then(res => { if (!cancelled) setChart(res); })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "차트를 불러오지 못했어요."); });
     return () => { cancelled = true; };
   }, [c.id]);
@@ -447,7 +445,7 @@ function SingleChartView({ company: c }: { company: Company }) {
       </div>
     );
   }
-  if (!series || series.length === 0) {
+  if (!chart || chart.price_series.length === 0) {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <span style={{ color: "#404870", fontSize: 13 }}>차트 불러오는 중...</span>
@@ -455,6 +453,7 @@ function SingleChartView({ company: c }: { company: Company }) {
     );
   }
 
+  const series = chart.price_series;
   const { data, volData, hi, lo, first, last } = (() => {
     const d = series.map((p, i) => ({
       i, time: p.time, open: p.open, high: p.high, low: p.low, close: p.close, range: [p.low, p.high],
@@ -482,8 +481,10 @@ function SingleChartView({ company: c }: { company: Company }) {
     return `${m}/${dd}`;
   };
 
-  const up  = last >= first;
-  const pct = ((last - first) / first * 100).toFixed(2);
+  const displayedPrice = chart.current_price || last;
+  const displayedChangeRate = chart.change_rate ?? ((last - first) / first * 100);
+  const up  = displayedChangeRate >= 0;
+  const pct = displayedChangeRate.toFixed(2);
   const lc  = up ? "#f43f5e" : "#3b82f6";
 
   const ttStyle = {
@@ -504,7 +505,7 @@ function SingleChartView({ company: c }: { company: Company }) {
           <div style={{ color: "#304060", fontSize: 12, marginTop: 2 }}>{c.ticker}</div>
         </div>
         <div style={{ marginLeft: "auto", textAlign: "right" }}>
-          <div style={{ color: "#e2e8f8", fontWeight: 800, fontSize: 22, letterSpacing: "-0.02em" }}>{last.toLocaleString()}</div>
+          <div style={{ color: "#e2e8f8", fontWeight: 800, fontSize: 22, letterSpacing: "-0.02em" }}>{displayedPrice.toLocaleString()}</div>
           <div style={{ color: lc, fontSize: 14, fontWeight: 700 }}>{up ? "+" : ""}{pct}%</div>
         </div>
       </div>
@@ -594,24 +595,38 @@ function SingleChartView({ company: c }: { company: Company }) {
 }
 
 // ─── Mini Chart Card (for Dual View) ─────────────────────────────────────────
-function MiniChartCard({ company: c, onPress }: { company: Company; onPress: () => void }) {
-  const [series, setSeries] = useState<ServerPricePoint[] | null>(null);
+function MiniChartCard({ company: c, onPress, onPriceUpdate }: {
+  company: Company; onPress: () => void;
+  onPriceUpdate?: (id: string, current_price: number, change_rate: number) => void;
+}) {
+  const [chart, setChart] = useState<ChartResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setSeries(null);
+
+    const load = () => {
+      fetchCompanyChart(c.id) // 일봉 고정에 맞춰 period 인자 제거
+        .then(res => {
+          if (cancelled) return;
+          setChart(res);
+          onPriceUpdate?.(c.id, res.current_price, res.change_rate);
+        })
+        .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "불러오기 실패"); });
+    };
+
+    setChart(null);
     setError(null);
-    fetchCompanyChart(c.id, "day")
-      .then(res => { if (!cancelled) setSeries(res.price_series); })
-      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : "불러오기 실패"); });
-    return () => { cancelled = true; };
-  }, [c.id]);
+    load();
+    const interval = setInterval(load, PRICE_REFRESH_INTERVAL_MS);
+
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [c.id, onPriceUpdate]);
 
   const color = getCompanyColor(c.id);
   const initials = getCompanyInitials(c.name);
 
-  if (error || !series || series.length === 0) {
+  if (error || !chart || !chart.price_series || chart.price_series.length === 0) {
     return (
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#0d1220", borderRadius: 20, border: "1px solid #1a2240", minHeight: 0 }}>
         <span style={{ color: "#404870", fontSize: 12 }}>{error ?? "차트 불러오는 중..."}</span>
@@ -619,13 +634,32 @@ function MiniChartCard({ company: c, onPress }: { company: Company; onPress: () 
     );
   }
 
-  const data = series.map((p, i) => ({ i, price: p.close }));
-  const first = series[0].open, last = series[series.length - 1].close;
-  const up = last >= first, pct = ((last - first) / first * 100).toFixed(2), lc = up ? "#f43f5e" : "#3b82f6";
+  const series = chart.price_series;
+  
+  // OHLC 데이터 구조 만들기 및 lo, hi 도메인 계산
+  const { data, first, last, lo, hi } = (() => {
+    const d = series.map((p, i) => ({
+      i, time: p.time, open: p.open, high: p.high, low: p.low, close: p.close, range: [p.low, p.high]
+    }));
+    return {
+      data: d,
+      first: series[0].open,
+      last: series[series.length - 1].close,
+      lo: Math.min(...series.map(p => p.low)),
+      hi: Math.max(...series.map(p => p.high)),
+    };
+  })();
+
+  const currentPrice = c.current_price ?? chart.current_price ?? last;
+  const isRateUp = (c.change_rate ?? chart.change_rate ?? 0) >= 0;
+  const pctStr = Math.abs(c.change_rate ?? chart.change_rate ?? 0).toFixed(2);
+  const lc = isRateUp ? "#f43f5e" : "#3b82f6";
+
+  // 🚀 에러의 원인: 이 줄이 빠져 있었습니다!
+  const domain = [lo * 0.98, hi * 1.02];
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#0d1220", borderRadius: 20, border: "1px solid #1a2240", overflow: "hidden", minHeight: 0 }}>
-      {/* Company info — tappable: navigates to single view per spec */}
       <button onClick={onPress} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px 12px", flexShrink: 0, background: "transparent", border: "none", borderBottom: "1px solid #141c2e", cursor: "pointer", textAlign: "left", width: "100%" }}>
         <div style={{ width: 40, height: 40, borderRadius: 13, background: color, display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{initials}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -637,18 +671,19 @@ function MiniChartCard({ company: c, onPress }: { company: Company; onPress: () 
           </div>
         </div>
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ color: "#e2e8f8", fontWeight: 800, fontSize: 17, letterSpacing: "-0.02em" }}>{last.toLocaleString()}</div>
-          <div style={{ color: lc, fontSize: 13, fontWeight: 700 }}>{up ? "+" : ""}{pct}%</div>
+          <div style={{ color: "#e2e8f8", fontWeight: 800, fontSize: 17, letterSpacing: "-0.02em" }}>{currentPrice.toLocaleString()}</div>
+          <div style={{ color: lc, fontSize: 13, fontWeight: 700 }}>{isRateUp ? "+" : ""}{pctStr}%</div>
         </div>
       </button>
 
-      {/* Sparkline — non-interactive div so horizontal swipe on chart area still navigates tabs */}
       <div style={{ flex: 1, minHeight: 0 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 12 }}>
-            <Line type="monotone" dataKey="price" stroke={lc} strokeWidth={2.5}
-              dot={false} isAnimationActive={false} />
-          </LineChart>
+          <BarChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+            <XAxis dataKey="i" hide />
+            <YAxis hide domain={domain} />
+            <ReferenceLine y={first} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+            <Bar dataKey="range" shape={<Candle />} isAnimationActive={false} />
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
@@ -960,20 +995,159 @@ export default function App() {
   // companyId -> 마지막으로 본 기사 id (Story_view_logs.last_viewed_article_id에 대응)
   const [storyProgress, setStoryProgress] = useState<Record<string, number>>({});
 
-  // Chart: mode-based (single or dual), no more card stack
-  const [chartMode, setChartMode]           = useState<ChartMode | null>({ type: "single", companyId: "005930" });
-  const [recentIds, setRecentIds]           = useState<string[]>(INIT_RECENT);
+  // Chart: mode-based (single or dual), no more card stack. 미리 정해둔 종목이 없으므로
+  // 빈 상태로 시작 — 사용자가 검색/스와이프로 종목을 선택하면 채워짐
+  const [chartMode, setChartMode]           = useState<ChartMode | null>(null);
+  // 최근 본 종목 — 서버에 저장되는 값이 아니라(조회용 API가 따로 없음) 세션 동안만 유지
+  const [recentIds, setRecentIds]           = useState<string[]>([]);
 
-  // Data — mockData.ts에서 API 응답 구조 그대로 초기화
-  const [news, setNews]             = useState<NewsItem[]>(MOCK_ARTICLES);
-  const [stockSubs, setStockSubs]   = useState(new Set(INIT_STOCK_SUBS));
-  const [sectorSubs, setSectorSubs] = useState(INIT_SUBS);
+  // Data — 처음엔 빈 배열로 시작, 마운트 시 실제 API에서 채움 (아래 loadMoreArticles 참고)
+  const [news, setNews]             = useState<NewsItem[]>([]);
+  // 회사 데이터 사전(dictionary) — ticker(id) 기준. 구독 목록/검색 결과/기사에 태깅된 회사가
+  // 조회되는 대로 계속 병합돼서, "지금까지 화면에 등장한 모든 회사"의 캐시 역할을 함
+  // (백엔드에 "전체 회사 목록" API가 없어서, MOCK_COMPANIES를 대체할 단일 소스가 없음)
+  const [companiesById, setCompaniesById] = useState<Record<string, ApiCompany>>({});
+  const [stockSubs, setStockSubs]   = useState<Set<string>>(new Set());
+  const [sectorSubs, setSectorSubs] = useState<Record<string, boolean>>({});
+
+  // companiesById에 새 회사 정보를 병합 — 이미 있는 필드(예: 구독 목록에서 온 가격)를
+  // 기사 태깅처럼 정보가 적은 소스가 덮어쓰지 않도록, 기존 값 위에 새 값을 얹는 방식으로 병합
+  const mergeCompanies = useCallback((list: ApiCompany[]) => {
+    if (list.length === 0) return;
+    setCompaniesById(prev => {
+      const next = { ...prev };
+      list.forEach(c => { next[c.id] = { ...next[c.id], ...c }; });
+      return next;
+    });
+  }, []);
+
+  // 기사에 태깅된 회사 참조({id, name})만으로도 아바타/이름 정도는 표시할 수 있게,
+  // 아직 companiesById에 없는 회사는 최소 정보로 채워둠 (가격 등은 null)
+  const mergeCompanyRefs = useCallback((refs: { id: string; name: string }[]) => {
+    setCompaniesById(prev => {
+      let changed = false;
+      const next = { ...prev };
+      refs.forEach(ref => {
+        if (!next[ref.id]) {
+          next[ref.id] = {
+            id: ref.id, name: ref.name, ticker: ref.id,
+            logo_url: null, current_price: null, change_rate: null,
+          };
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
+  // 앱 최초 실행 시 구독 중인 종목 목록을 실제 API에서 채움
+  useEffect(() => {
+    fetchSubscribedCompanies()
+      .then(list => {
+        mergeCompanies(list);
+        setStockSubs(new Set(list.map(c => c.id)));
+      })
+      .catch(err => console.error("구독 종목 목록 불러오기 실패:", err));
+  }, [mergeCompanies]);
+
+  // 🚀 새로 추가할 부분: 최근 본 항목 & 구독 목록 가격 즉시/주기적 갱신
+  useEffect(() => {
+    const tickers = Array.from(new Set([...stockSubs, ...recentIds]));
+    if (tickers.length === 0) return;
+
+    let cancelled = false;
+    const fetchPrices = () => {
+      fetchCompanyPrices(tickers)
+        .then(res => { if (!cancelled) mergeCompanies(res); })
+        .catch(err => console.error("가격 갱신 실패:", err));
+    };
+
+    fetchPrices(); // 추가되자마자 즉시 1회 갱신 (이게 없어서 -원이 떴음)
+    const interval = setInterval(fetchPrices, PRICE_REFRESH_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [stockSubs, recentIds, mergeCompanies]);
+
+  // 분야 목록 — 처음엔 빈 배열로 시작, 마운트 시 실제 GET /sectors로 채움
+  const [sectorGroups, setSectorGroups] = useState<ApiSectorGroup[]>([]);
+  useEffect(() => {
+    fetchSectorGroups()
+      .then(groups => {
+        setSectorGroups(groups);
+        setSectorSubs(buildInitSectorSubs(groups)); // 디바이스별로 이미 저장된 on/off 상태 그대로 반영
+      })
+      .catch(err => console.error("분야 목록 불러오기 실패:", err));
+  }, []);
+
+  // 분야별 숏츠(메인 피드) 커서 페이지네이션 상태
+  const [feedCursor, setFeedCursor]     = useState<number | null>(null);
+  const [feedHasMore, setFeedHasMore]   = useState(true);
+  const [feedLoading, setFeedLoading]   = useState(false);
+
+  // 다음 페이지 로드 — 이미 로딩 중이거나 더 가져올 게 없으면 아무것도 안 함
+  const loadMoreArticles = useCallback(async () => {
+    if (feedLoading || !feedHasMore) return;
+    setFeedLoading(true);
+    try {
+      const res = await fetchArticles(undefined, feedCursor ?? undefined);
+      setNews(prev => {
+        const existingIds = new Set(prev.map(a => a.id));
+        const merged = [...prev, ...res.articles.filter(a => !existingIds.has(a.id))];
+        return merged;
+      });
+      setFeedCursor(res.nextCursor);
+      setFeedHasMore(res.hasMore);
+    } catch (err) {
+      console.error("기사 목록 불러오기 실패:", err);
+    } finally {
+      setFeedLoading(false);
+    }
+  }, [feedCursor, feedHasMore, feedLoading]);
+
+  // 앱 최초 실행 시 1페이지 로드
+  useEffect(() => {
+    loadMoreArticles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 기사에 태깅된 회사들을 companiesById에 계속 병합 — 스와이프로 차트 진입 시(allCompanies
+  // 조회) 이름/아바타 정도는 바로 보여줄 수 있게 함 (가격은 구독/검색/prices 조회에서만 붙음)
+  useEffect(() => {
+    const refs = news.flatMap(a => a.companies);
+    if (refs.length > 0) mergeCompanyRefs(refs);
+  }, [news, mergeCompanyRefs]);
 
   // Overlay search
   const [companyQ, setCompanyQ] = useState("");
   const [chartQ, setChartQ]     = useState("");
 
-  const subCompanies = MOCK_COMPANIES.filter(c => stockSubs.has(c.id));
+  // 기업 검색(홈 구독추가 패널) — 입력 디바운스 후 실제 API 조회, 결과는 companiesById에도 병합
+  useEffect(() => {
+    if (!companyQ.trim()) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      searchCompanies(companyQ)
+        .then(results => { if (!cancelled) mergeCompanies(results); })
+        .catch(err => console.error("기업 검색 실패:", err));
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [companyQ, mergeCompanies]);
+
+  // 기업 검색(차트 탭 종목 선택 패널) — 동일하게 디바운스 후 조회
+  useEffect(() => {
+    if (!chartQ.trim()) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      searchCompanies(chartQ)
+        .then(results => { if (!cancelled) mergeCompanies(results); })
+        .catch(err => console.error("기업 검색 실패:", err));
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [chartQ, mergeCompanies]);
+
+  const subCompanies = useMemo(
+    () => Object.values(companiesById).filter(c => stockSubs.has(c.id)),
+    [companiesById, stockSubs]
+  );
 
   // 홈 화면 스토리 아바타 안읽음(빨간 테두리) 여부 —
   // "오늘(24시간 이내) 기사 중 하나라도 안 본 게 남아있으면 안읽음"으로 판단.
@@ -1008,6 +1182,16 @@ export default function App() {
     [sortedFeed, viewedArticleIds]
   );
 
+  // 숏츠 스와이프가 피드 끝에서 3개 이내로 가까워지면 다음 페이지 미리 로드
+  // (스토리 모드에서는 무한스크롤 대상이 아니라서 storyMode가 없을 때만 동작)
+  useEffect(() => {
+    if (storyMode) return;
+    if (!feedHasMore || feedLoading) return;
+    if (shortsIdx >= mainFeedDisplay.length - 3) {
+      loadMoreArticles();
+    }
+  }, [shortsIdx, mainFeedDisplay.length, storyMode, feedHasMore, feedLoading, loadMoreArticles]);
+
   // ── Actions ──────────────────────────────────────────────────────────────────
   const addRecentMultiple = useCallback((codes: string[]) => {
     setRecentIds(prev => {
@@ -1031,25 +1215,25 @@ export default function App() {
     });
   };
 
-  // 스토리 진입: 그 기업 태깅 + 24시간 이내 기사만, 오래된 순으로 고정 정렬(최신이 맨 아래)
-  const goFromCompany = (cId: string) => {
-    const company = MOCK_COMPANIES.find(x => x.id === cId);
-    const cutoff  = Date.now() - 24 * 60 * 60 * 1000;
-    const storyArticles = news
-      .filter(n => n.companies.some(c => c.id === cId) && new Date(n.published_at).getTime() >= cutoff)
-      .sort((a, b) => new Date(a.published_at).getTime() - new Date(b.published_at).getTime());
+  // 스토리 진입: 그 기업 태깅 + 24시간 이내 기사 실시간 조회 (오래된 순 고정 정렬/24시간 필터는 백엔드가 처리)
+  const goFromCompany = async (cId: string) => {
+    const company = companiesById[cId];
+    try {
+      const res = await fetchStoryArticles(cId);
+      if (res.articles.length === 0) return; // 24시간 내 기사가 없으면 진입 안 함
+      mergeCompanyRefs(res.articles.flatMap(a => a.companies));
 
-    if (storyArticles.length === 0) return; // 24시간 내 기사가 없으면 진입 안 함
+      // 이어보기: 서버가 내려준 is_viewed 기준으로, 마지막으로 본 기사 다음(안 본 것)부터 시작
+      const lastViewedIdx = res.articles.reduce((acc, a, i) => (a.is_viewed ? i : acc), -1);
+      const startIdx = lastViewedIdx >= 0 ? Math.min(lastViewedIdx + 1, res.articles.length - 1) : 0;
 
-    // 이어보기: 마지막으로 본 기사 다음(안 본 것)부터 시작
-    const lastViewedId = storyProgress[cId];
-    const lastIdx = lastViewedId != null ? storyArticles.findIndex(a => a.id === lastViewedId) : -1;
-    const startIdx = lastIdx >= 0 ? Math.min(lastIdx + 1, storyArticles.length - 1) : 0;
-
-    setStoryMode({ companyId: cId, articles: storyArticles });
-    setStoryIdx(startIdx);
-    setShortsFrom(company?.name ?? null);
-    setTab("shorts");
+      setStoryMode({ companyId: cId, articles: res.articles });
+      setStoryIdx(startIdx);
+      setShortsFrom(company?.name ?? null);
+      setTab("shorts");
+    } catch (err) {
+      console.error("스토리 조회 실패:", err);
+    }
   };
 
   // 스토리 모드에서 벗어날 때(다른 탭으로 이동 등) 호출
@@ -1064,17 +1248,60 @@ export default function App() {
       const existingId  = prev[storyMode.companyId];
       const existingIdx = existingId != null ? storyMode.articles.findIndex(a => a.id === existingId) : -1;
       if (storyIdx > existingIdx) {
+        markStoryViewed(storyMode.companyId, currentArticle.id).catch(err => {
+          console.error("스토리 열람 기록 실패:", err); // 실패해도 로컬 진행도는 유지 (재시도는 다음 진입 시)
+        });
         return { ...prev, [storyMode.companyId]: currentArticle.id };
       }
       return prev;
     });
   }, [storyIdx, storyMode]);
 
-  const toggleLike      = (id: number)   => setNews(p => p.map(n => n.id === id ? { ...n, is_liked: !n.is_liked } : n));
-  const toggleScrap     = (id: number)   => setNews(p => p.map(n => n.id === id ? { ...n, is_scrapped: !n.is_scrapped } : n));
-  const toggleStockSub  = (code: string) => setStockSubs(p => { const n = new Set(p); n.has(code) ? n.delete(code) : n.add(code); return n; });
-  const toggleSectorSub = (id: string)   => setSectorSubs(p => ({ ...p, [id]: !p[id] }));
-  const setSectorSubVal = (id: string, val: boolean) => setSectorSubs(p => ({ ...p, [id]: val }));
+  // 낙관적 업데이트: 화면은 즉시 바뀌고, 실패하면 롤백
+  const toggleLike = (id: number) => {
+    const article = news.find(n => n.id === id);
+    if (!article) return;
+    const wasLiked = article.is_liked;
+    setNews(p => p.map(n => n.id === id ? { ...n, is_liked: !n.is_liked } : n));
+    (wasLiked ? deleteInteraction(id, "LIKED") : postInteraction(id, "LIKED"))
+      .catch(err => {
+        console.error("좋아요 처리 실패:", err);
+        setNews(p => p.map(n => n.id === id ? { ...n, is_liked: wasLiked } : n));
+      });
+  };
+
+  const toggleScrap = (id: number) => {
+    const article = news.find(n => n.id === id);
+    if (!article) return;
+    const wasScrapped = article.is_scrapped;
+    setNews(p => p.map(n => n.id === id ? { ...n, is_scrapped: !n.is_scrapped } : n));
+    (wasScrapped ? deleteInteraction(id, "SCRAPPED") : postInteraction(id, "SCRAPPED"))
+      .catch(err => {
+        console.error("스크랩 처리 실패:", err);
+        setNews(p => p.map(n => n.id === id ? { ...n, is_scrapped: wasScrapped } : n));
+      });
+  };
+  // 낙관적 업데이트로 구독 on/off, 실패하면 롤백. 새로 구독한 종목은 검색 결과엔 가격이
+  // 안 붙어서 오므로(companies.js 주석 참고), 성공하면 별도로 현재가를 한 번 더 받아옴
+  const toggleStockSub = (ticker: string) => {
+    const wasSub = stockSubs.has(ticker);
+    setStockSubs(p => { const n = new Set(p); wasSub ? n.delete(ticker) : n.add(ticker); return n; });
+    setCompanySubscription(ticker, !wasSub)
+      .then(() => { if (!wasSub) fetchCompanyPrices([ticker]).then(mergeCompanies).catch(() => {}); })
+      .catch(err => {
+        console.error("종목 구독 처리 실패:", err);
+        setStockSubs(p => { const n = new Set(p); wasSub ? n.add(ticker) : n.delete(ticker); return n; }); // 롤백
+      });
+  };
+  const setSectorSubVal = (id: string, val: boolean) => {
+    const prevVal = sectorSubs[id] ?? false;
+    setSectorSubs(p => ({ ...p, [id]: val }));
+    setSectorSubscription(Number(id), val).catch(err => {
+      console.error("분야 구독 처리 실패:", err);
+      setSectorSubs(p => ({ ...p, [id]: prevVal })); // 실패 시 롤백
+    });
+  };
+  const toggleSectorSub = (id: string) => setSectorSubVal(id, !(sectorSubs[id] ?? false));
 
   // Panel → single chart (always single mode)
   const handleSelectChartCompany = (id: string) => {
@@ -1151,8 +1378,14 @@ export default function App() {
   const onPtrUp    = () => processGesture();
   const onPtrLeave = () => { if (ptrRef.current) processGesture(); };
 
-  const filteredForSearch = MOCK_COMPANIES.filter(c => !companyQ || c.name.includes(companyQ) || c.ticker.includes(companyQ));
-  const filteredForSelect = MOCK_COMPANIES.filter(c => !chartQ  || c.name.includes(chartQ)  || c.ticker.includes(chartQ));
+  // CompanySearchPanel은 자체 필터링을 안 하므로 여기서 직접 필터링 (검색어 없으면 빈 목록 —
+  // 백엔드 GET /companies가 q 파라미터 없이는 호출 불가능해서, 이전처럼 "전체 목록"은 못 보여줌)
+  const filteredForSearch = companyQ
+    ? Object.values(companiesById).filter(c => c.name.includes(companyQ) || c.ticker.includes(companyQ))
+    : [];
+  // CompanySelectPanel은 내부에서 query 기준으로 다시 필터링하므로, 여기선 지금까지 알고 있는
+  // 회사 전체(companiesById)를 그대로 넘기면 됨 — 디바운스 검색 결과가 들어오는 대로 반영됨
+  const filteredForSelect = Object.values(companiesById);
 
   return (
     <div style={{ minHeight: "100vh", background: "#020406", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Noto Sans KR','Inter',system-ui,sans-serif" }}>
@@ -1204,7 +1437,7 @@ export default function App() {
             );
           })()}
           {tab === "chart" && (
-            <ChartTab chartMode={chartMode} allCompanies={MOCK_COMPANIES}
+            <ChartTab chartMode={chartMode} allCompanies={filteredForSelect}
               onMenuPress={() => setOverlay("companySelect")}
               onSelectSingle={handleChartSelectSingle} />
           )}
@@ -1241,7 +1474,7 @@ export default function App() {
           <div style={{ position: "absolute", inset: 0, zIndex: 50, background: "rgba(0,0,0,0.7)" }} onClick={() => setOverlay(null)}>
             <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: 305, background: "#0a0e18", borderRight: "1px solid #141c2e", overflow: "hidden", animation: "slideL 0.28s cubic-bezier(0.22,1,0.36,1)" }} onClick={e => e.stopPropagation()}>
               {overlay === "interest" && (
-                <InterestPanel groups={MOCK_SECTOR_GROUPS} subs={sectorSubs} onToggleSub={setSectorSubVal} onClose={() => setOverlay(null)} onSectorPress={() => { setOverlay(null); exitStory(); setTab("shorts"); }} />
+                <InterestPanel groups={sectorGroups} subs={sectorSubs} onToggleSub={setSectorSubVal} onClose={() => setOverlay(null)} onSectorPress={() => { setOverlay(null); exitStory(); setTab("shorts"); }} />
               )}
               {overlay === "companySearch" && (
                 <CompanySearchPanel query={companyQ} onQueryChange={setCompanyQ} companies={filteredForSearch} stockSubs={stockSubs} onToggle={toggleStockSub} onClose={() => { setOverlay(null); setCompanyQ(""); }} />

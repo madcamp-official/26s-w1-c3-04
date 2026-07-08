@@ -11,6 +11,52 @@ const ARTICLE_FIELDS = `
   a.company_id_1, a.company_id_2, a.sector_id_1, a.sector_id_2, a.published_at
 `;
 
+// company_id_1/2, sector_id_1/2 (숫자 원본 id) -> companies[]/sectors[] (중첩 배열, 이름 포함)로 변환.
+// rows 안에서 실제 등장한 id만 모아서 딱 필요한 만큼만 조회함 (전체 테이블을 매번 긁지 않음).
+async function attachCompanySectorRefs(rows) {
+  const companyIds = new Set();
+  const sectorIds = new Set();
+  for (const r of rows) {
+    if (r.company_id_1) companyIds.add(r.company_id_1);
+    if (r.company_id_2) companyIds.add(r.company_id_2);
+    if (r.sector_id_1) sectorIds.add(r.sector_id_1);
+    if (r.sector_id_2) sectorIds.add(r.sector_id_2);
+  }
+
+  const companyMap = new Map();
+  if (companyIds.size > 0) {
+    const [companies] = await pool.query(
+      'SELECT id, name, ticker FROM `Companies` WHERE id IN (?)',
+      [[...companyIds]]
+    );
+    companies.forEach(c => companyMap.set(c.id, { id: c.ticker, name: c.name }));
+  }
+
+  const sectorMap = new Map();
+  if (sectorIds.size > 0) {
+    const [sectors] = await pool.query(
+      'SELECT id, name FROM `Sectors` WHERE id IN (?)',
+      [[...sectorIds]]
+    );
+    sectors.forEach(s => sectorMap.set(s.id, { id: String(s.id), name: s.name }));
+  }
+
+  return rows.map(r => {
+    const companies = [r.company_id_1, r.company_id_2]
+      .filter(Boolean)
+      .map(id => companyMap.get(id))
+      .filter(Boolean);
+    const sectors = [r.sector_id_1, r.sector_id_2]
+      .filter(Boolean)
+      .map(id => sectorMap.get(id))
+      .filter(Boolean);
+
+    // 원본 flat 필드(company_id_1 등)는 응답에서 빼고 companies/sectors로 교체
+    const { company_id_1, company_id_2, sector_id_1, sector_id_2, ...rest } = r;
+    return { ...rest, companies, sectors };
+  });
+}
+
 // GET /api/articles?mode=sector&sector_id=1&cursor=&limit=10
 // GET /api/articles?mode=story&company_id=5
 router.get('/', async (req, res, next) => {
@@ -42,9 +88,10 @@ router.get('/', async (req, res, next) => {
       );
 
       const viewedCount = rows.filter((r) => r.is_viewed).length;
+      const articles = await attachCompanySectorRefs(rows);
 
       return res.json({
-        articles: rows,
+        articles,
         totalCount: rows.length,
         viewedCount,
         unviewedCount: rows.length - viewedCount,
@@ -53,7 +100,14 @@ router.get('/', async (req, res, next) => {
 
     // mode === 'sector' (기본값): 최신순, 커서 기반 페이지네이션
     const params = [req.deviceId, req.deviceId]; // is_liked, is_scrapped용 device_id
-    let where = 'a.summary_headline IS NOT NULL';
+    let where = `a.summary_headline IS NOT NULL
+      AND NOT EXISTS(
+        SELECT 1 FROM \`Device_Article_Interaction\` viewed
+        WHERE viewed.device_id = ?
+          AND viewed.article_id = a.id
+          AND viewed.interaction_type = 'VIEWED'
+      )`;
+    params.push(req.deviceId);
 
     if (sector_id) {
       where += ' AND (a.sector_id_1 = ? OR a.sector_id_2 = ?)';
@@ -74,10 +128,11 @@ router.get('/', async (req, res, next) => {
     );
 
     const hasMore = rows.length > pageSize;
-    const articles = rows.slice(0, pageSize);
+    const pageRows = rows.slice(0, pageSize);
     const nextCursor = hasMore
-      ? new Date(articles[articles.length - 1].published_at).getTime()
+      ? new Date(pageRows[pageRows.length - 1].published_at).getTime()
       : null;
+    const articles = await attachCompanySectorRefs(pageRows);
 
     res.json({ articles, nextCursor, hasMore });
   } catch (err) {
@@ -106,14 +161,14 @@ router.post('/:id/interactions', async (req, res, next) => {
       });
     }
 
-    await pool.query(
+    const [insertResult] = await pool.query(
       `INSERT INTO \`Device_Article_Interaction\` (device_id, article_id, interaction_type, created_at)
        VALUES (?, ?, ?, NOW())
        ON DUPLICATE KEY UPDATE created_at = created_at`,
       [req.deviceId, articleId, interactionType]
     );
 
-    if (interactionType === 'LIKED') {
+    if (interactionType === 'LIKED' && insertResult.affectedRows === 1) {
       await pool.query('UPDATE `Articles` SET like_count = like_count + 1 WHERE id = ?', [
         articleId,
       ]);
@@ -142,13 +197,13 @@ router.delete('/:id/interactions/:type', async (req, res, next) => {
   }
 
   try {
-    await pool.query(
+    const [deleteResult] = await pool.query(
       `DELETE FROM \`Device_Article_Interaction\`
        WHERE device_id = ? AND article_id = ? AND interaction_type = ?`,
       [req.deviceId, articleId, type]
     );
 
-    if (type === 'LIKED') {
+    if (type === 'LIKED' && deleteResult.affectedRows > 0) {
       await pool.query(
         'UPDATE `Articles` SET like_count = GREATEST(like_count - 1, 0) WHERE id = ?',
         [articleId]

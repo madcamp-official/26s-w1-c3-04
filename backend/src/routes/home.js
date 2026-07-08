@@ -7,10 +7,24 @@ router.get('/', async (req, res, next) => {
   try {
     // 1) 구독 기업 스토리 레일 (안 읽음 = 빨간 테두리)
     const [stories] = await pool.query(
-      `SELECT company_id, name, logo_url, has_unread
-       FROM \`CompanySubscriptionWithStatus\`
-       WHERE device_id = ?
-       ORDER BY subscribed_at DESC`,
+      `SELECT c.id AS company_id, c.name, c.logo_url,
+              EXISTS(
+                SELECT 1
+                FROM \`Articles\` a
+                LEFT JOIN \`Story_view_logs\` sv
+                  ON sv.device_id = s.device_id AND sv.company_id = c.id
+                WHERE (a.company_id_1 = c.id OR a.company_id_2 = c.id)
+                  AND a.summary_headline IS NOT NULL
+                  AND a.published_at >= NOW() - INTERVAL 24 HOUR
+                  AND (
+                    sv.last_viewed_article_id IS NULL
+                    OR a.id > sv.last_viewed_article_id
+                  )
+              ) AS has_unread
+       FROM \`User_Company_Subscription\` s
+       JOIN \`Companies\` c ON c.id = s.company_id
+       WHERE s.device_id = ?
+       ORDER BY s.subscribed_at DESC`,
       [req.deviceId]
     );
 
