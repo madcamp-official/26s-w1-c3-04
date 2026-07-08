@@ -141,7 +141,7 @@ https://www.figma.com/design/Vq5QMbXViqNAHOJi2ChqVa/Stockshorts?node-id=0-1&p=f&
 
 | Method | Endpoint | 설명 | 요청 | 응답 |
 |---|---|---|---|---|
-|  |  |  |  |  |
+
 자세한 API 명세는 [backend/docs/api_docs.md](./backend/docs/api_docs.md) 파일을 참고해주세요.
 ---
 
