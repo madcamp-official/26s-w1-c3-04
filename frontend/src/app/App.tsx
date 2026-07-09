@@ -1661,9 +1661,13 @@ export default function App() {
   const filteredForSelect = Object.values(companiesById);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#020406", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Noto Sans KR','Inter',system-ui,sans-serif" }}>
+    <div style={{ height: "100dvh", minHeight: "100vh", overflow: "hidden", background: "#020406", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Noto Sans KR','Inter',system-ui,sans-serif" }}>
       <div
-        style={{ width: 390, height: 844, flexShrink: 0, position: "relative", background: "#07090f", borderRadius: 50, overflow: "hidden", border: "1px solid #151d30", boxShadow: "0 0 0 8px #0c0f1a,0 50px 120px rgba(0,0,0,0.95),inset 0 0 0 1px rgba(255,255,255,0.035)" }}
+        // 390x844(아이폰 16 기준)로 고정하면 더 작은 화면(아이폰 13 등)에서 프레임이
+        // 뷰포트보다 커져서 브라우저가 페이지 자체를 스크롤시켜버리고, 그 네이티브
+        // 스크롤이 앱 내부 커스텀 스와이프 제스처를 다 먹어버리는 문제가 있었음.
+        // min()으로 뷰포트보다 커지지 않게 해서 항상 화면 안에 딱 맞게 함.
+        style={{ width: "min(390px, 100vw)", height: "min(844px, 100dvh)", flexShrink: 0, position: "relative", background: "#07090f", borderRadius: 50, overflow: "hidden", border: "1px solid #151d30", boxShadow: "0 0 0 8px #0c0f1a,0 50px 120px rgba(0,0,0,0.95),inset 0 0 0 1px rgba(255,255,255,0.035)" }}
         onPointerDown={onPtrDown}
         onPointerMove={onPtrMove}
         onPointerUp={onPtrUp}
